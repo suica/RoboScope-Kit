@@ -74,3 +74,9 @@ needed and measure formal throughput without profiling.
 A self-test, smoke episode or first-action comparison does not establish full
 native equivalence, unchanged full-suite success rate or a 2x speedup. Record
 measured results and their limits here before making those claims.
+
+## Validation record
+
+[2026-11-07 integration validation](validation-20261107.md) records the fresh builds,
+real one-slot and five-slot smoke runs, exact native first-batch comparison,
+worker phase measurements and remaining full-suite acceptance work.

@@ -101,5 +101,9 @@ is not in the report, only the round-trip time of each request.
 Each benchmark keeps its profiling findings in its own documentation, newest first, with the date, machine,
 configuration, and Kit version:
 
+- [RoboCasa365](https://github.com/MINT-SJTU/RoboScope-Kit/blob/main/benchmarks/robocasa365/validation-20261107.md#worker-phase-measurements):
+  worker phase timers on an RTX 4090 found 65.05 s in Policy round trips and 47.02 s in
+  simulation/observations/rendering for a real 900-step smoke episode (2026-11-07, Kit 0.8.0b31,
+  K=1/G=1). This is smoke evidence; Nsight capture and Policy Server GPU attribution remain unverified.
 - [RoboDojo](https://github.com/MINT-SJTU/RoboScope-Kit/blob/main/benchmarks/robodojo/README.md#profiling):
   `arx_x5` keeps the GPU busy only about 11% of an episode (2026-11-05).
