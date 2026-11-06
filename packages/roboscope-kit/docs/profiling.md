@@ -70,8 +70,8 @@ PY
 
 ## Coverage
 
-Capture starts when the Worker's `PolicyClient` opens the `episode` range, so only benchmarks that call the
-Policy through `PolicyClient` record anything. The Policy Server does not run under `nsys`: its own GPU time
+Capture starts when the Worker opens the `episode` range. Most workers do this through
+`PolicyClient`; RoboCasa365 keeps one range open around its complete native episode group. The Policy Server does not run under `nsys`: its own GPU time
 is not in the report, only the round-trip time of each request.
 
 | Benchmark | Uses `PolicyClient` | Verified on hardware |
@@ -81,6 +81,7 @@ is not in the report, only the round-trip time of each request.
 | MetaWorld | Yes | Not yet |
 | robomimic | Yes | Not yet |
 | RoboCasa | Yes | Not yet |
+| RoboCasa365 | Yes; first native episode group | Not yet (worker phase timers are separate) |
 | CALVIN | Yes | Not yet |
 | RoboTwin | No, its launcher has its own client | Records nothing |
 

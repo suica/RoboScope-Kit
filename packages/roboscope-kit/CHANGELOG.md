@@ -2,6 +2,15 @@
 
 Platform-only release notes from earlier versions are omitted; other changes relevant to the Kit are retained.
 
+## 0.8.0b31 - 2026-11-07
+
+- Add an isolated RoboCasa365 multi-task benchmark and official Diffusion Policy example, preserving
+  the existing RoboCasa GR1 Tabletop suite. Freeze the 50-task pretrain-scene matrix, v1.0.1 task
+  horizons, native five-slot reset streams, consecutive-frame observations and group termination.
+- Add reproducible simulator and model environment builders with source and asset pins, episode
+  coverage and scenario fingerprints, phase timings, and an upstream action comparison helper.
+  Quick Tests are smoke subsets; native equivalence and full-suite performance require real evidence.
+
 ## 0.8.0b30 - 2026-11-06
 
 - Add `examples/xpolicylab/compare_native.py`, which runs a Kit RoboDojo run's tasks and layouts through the
