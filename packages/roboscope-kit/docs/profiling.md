@@ -108,6 +108,9 @@ configuration, and Kit version:
   Consumed-frame rendering reduced camera calls but the full comparison rejected different initial
   scenarios and trajectories; no speedup ratio or unchanged-accuracy claim was accepted. Separate
   server CUDA event intervals include stream idle gaps and are not Nsight kernel-level coverage.
+  A separate unscored 128-step fixed-action replay matched physics, control and retained observations
+  exactly between modes; CPU profiling attributed 52.4% of that profiled prefix to `mj_step1` and
+  23.2% to enclosing robot control. Those nested diagnostic intervals are not formal throughput.
 - [RoboCasa365](https://github.com/MINT-SJTU/RoboScope-Kit/blob/main/benchmarks/robocasa365/validation-20261107.md#worker-phase-measurements):
   worker phase timers on an RTX 4090 found 65.05 s in Policy round trips and 47.02 s in
   simulation/observations/rendering for a real 900-step smoke episode (2026-11-07, Kit 0.8.0b31,
