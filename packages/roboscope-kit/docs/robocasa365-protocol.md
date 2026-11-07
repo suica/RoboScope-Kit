@@ -88,13 +88,17 @@ generates its native observation; no rendering omission is enabled in this
 baseline. Model normalization, language embeddings and model inference belong
 to the Policy example and are not credited as runtime acceleration.
 
-An experimental `render_mode=consumed` runtime option retains those same required
-frames and reuses discarded intermediate RGB samples without disabling observable
+An experimental `render_mode=consumed` runtime option selects those required
+physical frame times and reuses discarded intermediate RGB samples without disabling observable
 clocks. It requires a declared stride-eight Policy without intermediate updates
 and the locked simulator patch. Default `all` rendering remains enabled. The
-[small-scale study](../../../benchmarks/robocasa365/runtime-optimization-20261107.md)
-records a rejected full-rollout comparison; this option has not established
-unchanged accuracy or a throughput benefit. Audit and camera-timing switches are
+[rendering correctness study](../../../benchmarks/robocasa365/rendering-correctness-20261107.md)
+records multi-group effective-input, action and physics drift, including an
+`all`/`all` control. A registered 50-pair trial matched task-success outcomes
+(14/50 each), steps and termination; this is sample-limited outcome evidence,
+not exact behavior or a population accuracy guarantee. The option remains
+experimental, with no accepted throughput benefit or general accuracy claim.
+Audit and camera-timing switches are
 diagnostic tools and should be off in repeated performance measurements.
 
 The pinned Gym wrapper declares every state space as `Box(-1, 1)`, including
@@ -152,6 +156,29 @@ real Policy input batch and returned actions under `evidence/worker-*/` for
 native preprocessing/action parity checks. These artifacts stay outside Git.
 
 ## Profiling and correctness limits
+
+Kit 0.8.0b33 requires the locked marker-2 renderer cleanup in both simulator
+build profiles. Cleanup binds the owning EGL context, preserves an interrupted
+foreign context/API/surfaces, and reserves thread-wide release for process exit.
+Rebuild older prefixes through the committed build script; the worker and
+self-test reject the older cleanup marker.
+
+The separate `--paired-validation` build adds deterministic XML reset-region
+deduplication and explicit stack-base RNG forwarding to both comparison arms.
+Its manifest selects `runtime_profile=paired-stable-regions-v1` and always
+reports `full_suite: false`. Ordered deduplication changes the identity-dependent
+upstream seed-to-scene realization, so this profile is not an official score.
+The default profile retains upstream reset-region ordering. Cross-profile
+prefix reuse and changed patch provenance are rejected.
+
+For native-five-slot trajectory audits, `pair_reference_output` can require exact
+recorded initial model/integration/RNG/controller/sensor signatures before Policy
+reset and inference. It waits for the corresponding reference group, persists
+rejection and neither reseeds nor replaces mismatched episodes. The optional
+Policy audit retains full prepared-input hashes and separately hashes CPU inputs
+restricted to the verified loaded model's fixed eval crop. Raw-image equality
+and behavioral equivalence remain distinct checks; matching a short crop-aware
+pilot does not establish equivalence in later groups or for another Policy.
 
 Each work result separates environment construction, resets, stepping,
 Policy round trips, video writes, cleanup and total task wall time. Those

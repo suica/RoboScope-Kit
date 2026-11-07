@@ -1,296 +1,347 @@
-# RoboCasa365 rendering correctness study — 2026-11-07
+# RoboCasa365 rendering correctness and timing — 2026-11-07
 
-Kit **0.8.0b33** provides a corrected renderer baseline and an isolated common
-setup for testing consumed-frame rendering. A full five-slot diagnostic matched
-all physical trajectories, actions and Policy RNG states, with 3/5 successes in
-each arm. Its few unequal border pixels were outside the checkpoint's verified
-fixed crop; **full-image equality still failed**. A check on the final runtime
-and the replacement **50-episode-per-arm** evaluation remain pending. No speedup
-or unchanged full-suite accuracy claim is accepted.
+**Consumed-frame rendering remains experimental and disabled by default.** The
+registered `fixed50-03` trial completed **50 episodes per arm**, with **14/50
+successes (28%) in both arms**, identical paired success outcomes, steps and
+termination reasons. All registered physical reset conditions and provenance
+checks passed. This establishes **no observed paired task-success change in
+this recorded sample**, not unchanged population accuracy or exact behavior.
+Strict/effective/trajectory audits still failed, and the earlier `all`/`all`
+control also diverged. No speedup or absolute no-impact claim is made. Earlier
+failed studies and their lost-record limits remain documented below.
 
-## Frozen workload
+## Frozen workload and revisions
 
-The selected task is **TurnOnElectricKettle**, with ten sequential groups of five
-native slots per arm. The official v1.0.1 horizon remains **450 physical steps**;
-the native group success barrier and termination checks remain active. Episodes
-are not shortened for this experiment. Actual terminal steps must come from
-completed records, since the native barrier can end a group before its horizon.
+This task retains its official v1.0.1 **450-step horizon**, native five-slot
+batches, group success barrier and termination checks. Fifty episodes mean ten
+sequential groups. Labels are identifiers, not reset seeds: constructor streams
+use `1111111 + slot`, followed by unseeded continuation resets. The study is
+always `full_suite: false`, separate from the official 50-task/2,500-rollout suite.
+The corrected 28% baseline sample rate satisfies the requested 20–80% task
+selection range; it does not establish a population success probability.
 
-An earlier five-slot screening reported 1/5 successes and motivated this task
-selection. That screening preceded the renderer correction below. Its 20% rate
-is **not** a corrected-renderer baseline or a population success-rate estimate.
-
-| Setting | Both arms |
+| Setting | Fixed configuration |
 |---|---|
+| Kit | 0.8.0b33; published fork commit `425e9fd5e84f1c63c3e50d64f2bb316a5f483c64`, tree `489a7646ea75f69d45455917e917d32bd17105ce` |
 | Machine | RTX 4090, reported 49,140 MiB; driver 580.105.08; 12-core container quota; 96 GiB memory limit |
-| Kit | 0.8.0b33 |
-| Simulator | RoboCasa 1.0.1, `3443cdf3dd20f9ae8ed41adba442059b506891d0`; RoboSuite 1.5.2, `5ce6643f3092639d08f7b0f90ed1c6a84f50552c` |
+| Simulator | RoboCasa 1.0.1 `3443cdf3dd20f9ae8ed41adba442059b506891d0`; RoboSuite 1.5.2 `5ce6643f3092639d08f7b0f90ed1c6a84f50552c` |
 | Runtime | Python 3.11.13, MuJoCo 3.3.1, NumPy 2.2.5, EGL |
-| Model | Official `pretrain_human300` epoch-0500 Diffusion Policy; pinned checkpoint and CLIP hashes |
-| Inference | FP32, 100 denoising steps, five-row batches, eight actions per chunk |
-| Inputs | Three 256×256 RGB cameras, relative end-effector position/quaternion, gripper state and language; last two consecutive physical frames |
-| Scenarios | `pretrain`; constructor seeds `1111111 + slot`; sequential unseeded continuation resets |
-| Planned identifiers | `TurnOnElectricKettle-rollout-100000` through `100049` |
-| Scheduling | K=1/G=1 per arm; MPS disabled; concurrent correctness arms share the machine |
-| Outputs | Videos disabled; trajectory, initial-state, Policy and diagnostic timing audits enabled |
-| Runtime profile | `paired-stable-regions-v1`; always `full_suite: false` |
+| Policy | Official `pretrain_human300` epoch-0500 DP/local CLIP; FP32, 100 denoising steps, five-row batches, eight-action chunks |
+| Inputs | Three 256×256 RGB cameras, relative end-effector position/quaternion, gripper state and language; last two consecutive physical observations |
+| Scenarios | `pretrain`; common `paired-stable-regions-v1` validation profile |
+| Scheduling/output | K=1/G=1 per arm, MPS disabled; concurrent arms; audits/timers enabled, videos disabled |
 
-Frozen hashes are in [source-inputs.json](source-inputs.json),
+Hashes are in [source-inputs.json](source-inputs.json),
 [runtime-patches.json](runtime-patches.json), [asset-inputs.json](asset-inputs.json)
 and [model-inputs.json](../../examples/robocasa365_diffusion/model-inputs.json).
-The [integration record](validation-20261107.md) lists the separate inference
-environment and model-source pins. The older GR1 `robocasa/tabletop` runtime is
-separate.
+The [integration record](validation-20261107.md) lists inference dependencies.
+GR1 `robocasa/tabletop` remains separate.
+Reproduction uses the [build instructions](README.md#build-and-run) and
+[native group helper](../../examples/robocasa365_diffusion/README.md#native-five-slot-smoke):
+`--task TurnOnElectricKettle --groups 10` for the large attempt, or `--groups 2`
+with `all` in both arms for the final control, retaining the audited settings above.
 
-## Renderer baseline erratum
+## Corrections and experimental scope
 
-Sequential hard resets exposed a context ownership error in upstream renderer
-cleanup. Deleting an old renderer's GPU resources without binding its owning EGL
-context could free resources belonging to another slot. Initial images, physical
-states and first actions could match while subsequent images in the first four
-slots were corrupted; the last-created slot could remain unaffected.
+The pinned renderer could free another slot's resources during sequential hard
+resets unless cleanup first bound its owning GL context. The reviewed
+[cleanup patch](patches/owning-egl-context-cleanup.patch) corrects ownership and
+rebinds a new renderer after replacement. Marker 2 also
+[preserves interrupted EGL bindings](patches/preserve-egl-thread-state.patch):
+API, display, context and read/draw surfaces. Per-context destruction no longer
+releases the whole thread; initialization retains its release, and process-exit
+cleanup releases the thread before display termination. Destroyed contexts are
+never rebound. Both profiles include these fixes. They have **not** been
+established as the cause or cure of the pixel differences or later drift.
 
-The reviewed [owning-context patch](patches/owning-egl-context-cleanup.patch)
-binds the old renderer's context before destruction and rebinds the new context
-after replacement. Both build profiles and both experiment arms include this
-fix, verified by original, patch and resulting-file hashes. The worker rejects
-a renderer missing its cleanup marker.
-
-The final **marker-2** cleanup also preserves the interrupted EGL client API,
-display, context and read/draw surfaces around delayed destruction. Per-context
-cleanup no longer calls the thread-wide `eglReleaseThread`; initialization
-retains its release, and final thread release runs at process exit before display
-termination. A previously destroyed owner is never rebound. Both profiles and
-both arms receive the
-[EGL preservation patch](patches/preserve-egl-thread-state.patch). CPU mocks cover
-foreign/owner/unbound contexts, nested finalizers, exceptions and restoration
-failure. **This known restoration defect has not been established as the cause
-of the small border-pixel differences described below.**
-
-Earlier multi-slot scores and timing attribution in the
-[integration record](validation-20261107.md) and
+Earlier b31/b32 multi-slot scores and timing attribution in
+[integration validation](validation-20261107.md) and the
 [small-scale study](runtime-optimization-20261107.md) are superseded diagnostics.
-They must not serve as corrected baseline scores, render-cost estimates or a
-before/after speed comparison. The earlier single-slot fixed-action prefix did
-not exercise the five-slot cleanup failure either. This study starts with a
-fresh corrected runtime.
+Matching initial inputs had not excluded later corrupted images. The old
+single-slot replay did not exercise the five-slot cleanup lifecycle.
 
-## Common paired setup and its protocol limit
+A fresh `--paired-validation` prefix adds stable Counter reset-region ordering
+and intended RNG forwarding for stack-base fixtures, equally in both arms.
+RNG forwarding adds no environment RNG draws. Stable ordering preserves
+candidate membership but **changes seed-to-scene mapping**; this is not the
+upstream official seeded realization. The profile always reports
+`full_suite: false`, and cross-profile prefix reuse is rejected.
 
-The optional `--paired-validation` build creates a separate prefix and applies
-two setup fixes **equally to both arms**:
+The tested acceleration renders the last two consecutive frames of each action
+chunk, including partial chunks, and reuses discarded intermediate RGB samples.
+Sensor clocks, physics, controllers, state observations, success checks and
+termination still execute. No model, precision, sampler, normalization, K/G or
+autotune optimization was included. Default evaluation remains `all`.
 
-- Counter reset-region deduplication uses XML insertion order through
-  `list(dict.fromkeys(valid_geoms))`. The former set used object-identity order,
-  which `PYTHONHASHSEED` does not stabilize.
-- Stack-base construction passes `rng=self.rng` to `initialize_fixture`. That
-  helper overwrites the config's RNG with its explicit argument. Previously the
-  missing argument caused the Box to retain an entropy-seeded RNG. The Box only
-  assigns the supplied RNG and adds no environment RNG draws; explicit box size
-  also avoids random size sampling.
+## Correctness outcomes
 
-Stable ordering preserves candidate membership but **changes the previous
-identity-dependent seed-to-scene mapping**. Equal numeric seeds do not make this
-the official upstream scenario realization. Results are validation evidence on
-a common setup, not an official target50 score or native leaderboard
-reproduction. The profile always reports `full_suite: false`. Cross-profile
-prefix reuse and changed selected-patch provenance are rejected; the canonical
-runtime is not patched in place.
-
-The earlier `aa-01` A/A control was rejected: equal initial model, integration
-state and inputs did not prevent unequal fixture RNG signatures and later drift.
-After the common setup and renderer fixes, **`aa-02` passed the strict full-episode
-comparison in all five slots**. This validates repeatability for that control
-workload before the final marker-2 update. The final runtime and larger rendering
-comparison require fresh checks; an earlier pass is not transferred to changed
-runtime code.
-
-## Render change and audit coverage
-
-`all` renders each camera at every physical step. `consumed` retains the final
-two consecutive frames of each action chunk, including partial final chunks,
-and returns cached RGB on discarded intermediate steps. Sensor updates and
-sampling clocks, physics, controllers, state observations, success checks and
-termination continue at their native frequency. The model, normalization,
-precision, diffusion noise stream and inference schedule are unchanged.
-Default evaluation remains `all`.
-
-The second arm's `--pair-reference-output` guard requires exact initial evidence
-for each group **before Policy reset/inference**. A mismatch persists as
-`pairing-rejected.json`; a retry cannot turn that rejection into acceptance.
-The guard does not restore state, reseed, drop or replace unmatched episodes.
-
-| Layer | Compared evidence |
-|---|---|
-| Workload | Source/profile/task/scenario plan, native slots/order, IDs, horizon, steps, termination, unique coverage, worker failures/retries/OOM |
-| Initial state/model | Scenario metadata, consumed raw features, `mjSTATE_INTEGRATION`, public primitive compiled-model fields plus `mjOption`/`mjStatistic` |
-| Python state | Located environment/robot/fixture/placement-sampler RNGs and sharing; declared controller/buffer/fixture fields; sensor schedules and non-image caches |
-| Each physical step | Integration-state digest and physical state/control/success/done digest |
-| Each inference batch | Full worker/prepared input and action digests; separate verified effective-input digests; row identities/order; Policy CPU/CUDA RNG before and after inference |
-| Completion | Per-episode success/terminal step, four complete trajectory digests, final covered RNG/controller/sensor signatures and coverage descriptions |
-
-`mjSTATE_INTEGRATION` includes warmstart, control and other integration inputs
-missing from `sim.get_state().flatten()`. The compiled-model signature omits only
-RGBA rows of currently invisible collision-group-zero geometry, whose random
-colors can change raw XML without changing visible images or physics. Collision
-geometry, materials, textures and all other covered fields remain checked.
-
-Signatures declare their limits: they are not raw MuJoCo memory hashes or a
-complete Python clone. Discarded image caches are excluded from sensor schedule
-signatures. The strict report retains every full-image/prepared-input mismatch.
-A separate model-specific behavioral report requires exact **effective** inputs,
-actions/RNG, covered trajectories, outcomes, termination, provenance and coverage;
-it does not relabel a failed full-image report as a strict pass.
-
-Effective inputs are verified against the **actual loaded evaluation modules**,
-not inferred from a nominal crop setting. The audit rejects unknown encoder,
-normalizer or crop source hashes, training mode, unsupported shapes/randomizers,
-multiple crops or positional encoding. For this checkpoint, each RGB path uses
-one deterministic 224×224 center crop from 256×256: zero-based rows and columns
-`[16:240]`, with the upper bound excluded. All non-image prepared inputs remain
-included unchanged. The saved normalizer is the verified elementwise affine
-implementation, so equality on the selected CPU values implies equality after
-that same normalization and fixed selection. No inference crop is added or
-changed. The wrapper retains full `prepared_sha256` alongside the separate
-`effective_input_sha256`; no pixel tolerance is used. It adds no model calls,
-RNG draws, GPU copies or explicit CUDA synchronization.
-
-## Frozen attempt and results
-
-`fixed50-01` planned 50 episodes per arm, but was stopped after the first reported
-prepared-input difference in **slot 3, batch 16, physical step 128**. Initial
-group checks had passed. Model metadata, Policy RNG signatures and actions still
-matched through 20 captured calls; those matches do not excuse unequal inputs.
-The failed attempt is retained. It produced no completed episode records and
-cannot support a 50-episode success-rate comparison.
-
-| Check | `aa-02`: `all` / `all` | `fixed50-01`: `all` / `consumed` |
+| Run | Retained/completed evidence | Outcome |
 |---|---|---|
-| Planned episodes per arm | 5 | 50 |
-| Completed episode coverage | Five per arm; strict comparison passed | No completed episode records; stopped early |
-| Initial group guard | Passed | Passed for the reached initial group |
-| Full recorded comparison | Passed for all five episodes | Rejected: prepared-input mismatch |
-| Success-rate comparison | Repeatability control only | Unavailable |
-| Unchanged rendering behavior | Not tested by A/A | Not established |
-| Speedup ratio | Not measured | Suppressed |
+| `fixed50-02/a`, `all` | 50 unique original records; 22,500 steps; 570 batches | 14/50 successes (28%); no worker failure/retry/OOM; 67,500 render calls, zero reuse |
+| `fixed50-02/b`, `consumed` | 35 episodes observed live; 15,750 steps; 399 batches | 11/35 successes (31.4%) in a **diagnostic prefix only**; no terminal result; full 35 partial records lost |
+| `aa-03`, `all` / `all` | 10 unique original records per arm; 4,500 steps and 114 batches each | 4/10 successes each; no worker failure/retry/OOM; strict and behavioral checks failed |
+
+### Incomplete candidate and retention failure
+
+The first effective-input/action difference occurred at **global batch 60,
+second-group step 24, slots 0 and 2**. The preceding steps 0/8/16 of that group
+matched. Across **399 shared batches / 1,995 rows**, saved Policy audits contain
+**676 unequal effective-input rows and 676 unequal action rows across 333
+batches**, plus 683 unequal full prepared rows. All shared CPU/CUDA RNG
+signatures matched. These are not solely outside-crop differences.
+
+Live comparison reported physical/integration/action trajectory hash differences
+in **15 episodes** before failure. Candidate terminal hashes were subsequently
+lost, so that live observation **cannot now be revalidated against all original
+records**. It is not a complete retrospective per-episode comparison.
+
+At **group 07, slot 2**, the initial guard rejected only
+`initial_observation_sha256`. Covered compiled model, integration-state, RNG,
+controller and sensor signatures matched. Actual initial arrays were not saved
+for this rejection: **the differing feature, camera, pixel and crop location are
+unknown**. The earlier border-pixel explanation cannot be assigned to group 07.
+
+The SDK automatically retried once; the sticky rejection correctly refused the
+retry before Policy inference. B ended with **two worker failures and one
+automatic retry**. There was no manual restart, reseed, record replacement or
+guard relaxation. SDK requeue cleanup deleted its partial WorkResult; retry
+publication may also have overwritten group-00 initial evidence. The monitor
+had retained summaries/counts, not the full 35 candidate records. Surviving
+Policy/group audits and logs are preserved. Missing records/hashes have not
+been fabricated or reconstructed.
+
+The 11/35 prefix is not a formal score or a valid accuracy comparison with
+14/50. B has no complete final coverage validation, and the full-run comparator
+could not finish without its terminal result/WorkRecords. Available effective
+input/action/physics evidence already fails acceptance. A full 50/50 accuracy
+claim or paired confidence interval is unavailable.
+
+### Final all/all control
+
+`aa-03` used the frozen marker-2 runtime and `all` in both arms. First-group
+inputs matched and both initial-group checks passed. Effective-input/actions
+first diverged at **batch 60 / step 24, slot 0**; slot 2 joined at **batch 61 /
+step 32**. There were **107 unequal effective/prepared rows**, **54 unequal
+action batches**, and **two episodes** with unequal physical/integration/action
+and final controller/sensor signatures. RNG signatures remained equal. Both
+arms completed 10 episodes with 4 successes. Original records are retained;
+the final comparator reports `pass: false` and
+`behavioral_equivalence.pass: false`.
+
+Thus multi-episode repeatability fails even within the baseline. A/B drift cannot
+be attributed solely to consumed rendering. Equal success counts do not prove
+unchanged behavior; failed comparisons also do not prove the optimization
+caused an accuracy change. **Neither no-impact nor speedup is claimed.**
+
+## Registered completed outcome trial: fixed50-03
+
+The method was registered **before launch**, with plan SHA256
+`4d94fd45333f78351eaa8863770f8f637f3b23ea6a9693b2c8ab9e7647053241`.
+The source, checkpoint, FP32/100-step inference, 50 scenario labels/constructor
+streams, task, full horizons, native ordering, K/G and modes were unchanged.
+Only the existing optional `--pair-reference-output` raw-observation blocking
+guard was omitted; no SDK evaluation code or scoring rule changed. Raw inputs
+and all secondary hashes were still recorded. Old failures were retained;
+there was no reseeding, selective replacement, dropped mismatch or manual retry.
+
+This method follows the failed multi-group A/A control: bitwise trajectories
+are not a repeatable baseline criterion. The independent **post-run** validator
+required every pair's initial state, scenario metadata, full integration state,
+compiled-model signature, located RNG, controller and sensor signature, plus
+all coverage descriptions, to match. It also checked frozen source/runtime,
+Policy metadata, task/slot/seed/protocol provenance, counters, full unique
+terminal coverage and zero recovery. All **50 pairs** passed those requirements;
+all 10 initial files and all 50 **raw initial observation hashes also matched**.
+Nothing was restored or selectively matched after the run.
+
+| Primary outcome / validation | `all` baseline | `consumed` candidate |
+|---|---:|---:|
+| Completed unique records | 50/50 | 50/50 |
+| Task successes | 14/50 (28%) | 14/50 (28%) |
+| Actual physical steps | 22,500 | 22,500 |
+| Policy batches | 570 | 570 |
+| Worker failures / retries / OOM | 0 / 0 / 0 | 0 / 0 / 0 |
+| Real camera calls | 67,500 | 17,100 |
+| Reused camera samples | 0 | 50,400 |
+| Steps with fresh RGB | 22,500 | 5,700 |
 | `full_suite` | `false` | `false` |
 
-### Complete five-slot diagnostic and crop investigation
+The paired table has **14 both-success, 36 both-failure, zero baseline-only and
+zero candidate-only successes**. There were **zero step-count differences and
+zero termination-reason differences**. Every episode used 450 steps. Model RNG
+reset and batch signatures had zero differences. `primary-outcome.json` reports
+`criterion_valid: true`, `no_observed_paired_success_change: true` and **zero
+validation issues**. Original full WorkResults were backed up with content hashes
+at every five-record increment, independently of retry-managed queue files.
 
-`probe-render-01` ran both modes for **450 steps in every slot**: 2,250 physical
-steps and 57 five-row Policy batches per arm. All captured integration, control,
-qpos and qvel arrays were exactly equal, including the initial state and every
-transition. All 57 batches' actions and Policy RNG states matched exactly. Both
-arms recorded **3/5 successes**.
+The separate audits remain **`strict_pass: false` and behavioral pass false**:
+19 episodes differ in physical/integration/action digests, 22 in observation
+digests, 911 effective-input/action rows across 490 batches, and 920 full
+prepared rows across 494 batches. The first effective/action difference is
+batch 60, slot 0, step 24. These failures were not masked or converted into exact
+passes by the outcome criterion. The render-call reduction is measured work
+avoidance, not a measured end-to-end speedup.
 
-Only three prepared rows differed: slot 3 at inference steps 128, 136 and 144.
-Each difference was in the **first history frame** of the left camera, from
-physical steps **127, 135 and 143** respectively. There were **4, 6 and 7 RGB
-channel values** differing by one uint8 level, within zero-based rows 97–101 and
-columns 240–243. These columns lie outside `[16:240]`. The maximum difference
-after conversion to float32 `[0,1]` was approximately `1/255`.
+The supported conclusion is limited to these 50 recorded pairs on one task and
+the common diagnostic scene mapping. Equal sampled outcomes do not prove
+population equivalence, arbitrary-Policy/full-suite accuracy or future no-impact.
+Only one registered 50-pair trial was run. A non-significant test would not
+supply such a guarantee either. Because baseline A/A trajectories also diverge,
+secondary A/B drift cannot be attributed solely to consumed rendering. Default
+rendering remains `all`; concurrent audited timings support no speedup claim.
 
-The real checkpoint was loaded on CPU to validate the encoder/crop/normalizer
-contract without inference calls. Separately, **105 checks of captured arrays
-through the actual evaluation crop path were exact**, with no failed crop checks.
-This explains why those saved border differences do not alter the verified
-model-consumed crop; it does not establish identical 256×256 rendered images or
-explain their rendering cause. The strict raw/prepared-image report remains
-**false**. Observed equality of physics/actions/RNG/outcomes and the verified
-effective-input criterion are reported separately.
+## Audit coverage and bounded crop evidence
 
-### Current acceptance state
+The audit covers workload/provenance, initial scenario/compiled-model
+signatures, full MuJoCo `mjSTATE_INTEGRATION`, declared controller/fixture fields,
+located RNG states/sharing, sensor schedules, physical transitions, prepared
+inputs, actions, Policy RNG, outcomes and termination. Coverage is declared;
+this is not a complete Python clone or raw MuJoCo memory dump. Only RGBA rows
+of currently hidden collision-group-zero geometry are omitted from model
+signatures, because upstream randomizes these invisible colors.
 
-| Attempt | Scope / result |
+Earlier `probe-render-01` completed five 450-step episodes per arm with physical
+arrays and 57 action/RNG batches exact and 3/5 successes each. Three slot-3
+left-camera first-history frames, physical steps 127/135/143, differed by
+4/6/7 uint8 channel values of one level at rows 97–101, columns 240–243. Those
+saved differences were outside the actual 224×224 center crop `[16:240,16:240]`;
+105 captured crop checks were exact. This one-group finding did not extend to
+the multi-episode failures.
+
+The Policy audit preserves full prepared hashes and separately hashes effective
+CPU inputs after checking the actual loaded eval encoder, crop and elementwise
+normalizer sources/configuration. Unknown paths fail closed; all non-image
+inputs remain included. No inference crop, model call, RNG draw, GPU copy or
+synchronization is added. Full-image mismatches stay strict failures. The
+separate model-specific behavioral criterion requires exact effective inputs,
+actions/RNG, covered trajectories, outcomes and coverage. Both criteria failed
+in the final two-group control and the registered 50-pair trial; task outcomes
+are assessed separately above.
+
+## Descriptive baseline timing
+
+`baseline50-timing.json` derives these intervals from the earlier completed
+`fixed50-02/a` final result and
+original WorkResult. **This was not an idle-machine performance baseline.**
+The arms shared resources until B exited after 35 observed episodes; CPU build
+and snapshot work also overlapped. Audits/timers remained enabled. No comparative
+speed ratio is calculated.
+
+| Top-level helper phase | Seconds | Scope |
+|---|---:|---|
+| End-to-end | 1,583.614 | Whole helper interval; excludes prior builds/downloads |
+| Checkpoint preparation | 0.038 | Path/preparation bookkeeping |
+| Autotune placeholder | 0.038 | No tuning; fixed K/G |
+| Policy process/load/readiness | 11.214 | Imports, verification, model/CLIP loading and readiness |
+| Runtime preparation | 0.841 | Before evaluated execution |
+| Evaluation | 1,569.717 | Worker lifecycle and evaluated/audited work |
+| Other helper work | 1.767 | Remaining interval |
+
+Model-only loading, first-inference latency and server GPU execution were **not
+measured separately**. The runtime window was 1,571.806 s, with descriptive rates
+114.52 completed episodes/h and 14.315 steps/s. These are not production
+throughput measurements.
+
+| Worker category | Seconds | Evaluation share / meaning |
+|---|---:|---|
+| Environment construction | 26.723 | 1.7%; five constructors, including native warm resets |
+| Evaluated resets/initial evidence | 248.004 | 15.8%; includes fingerprints and initial audits |
+| Native simulation/observations | 808.320 | 51.5%; physics, controllers, fixtures, success checks, conversion/rendering |
+| Policy round trips | 464.856 | 29.6%; protocol, preprocessing, GPU work, copies/server audit writes |
+| History assembly | 0.641 | Worker observation construction |
+| Action conversion | 0.081 | Native converter |
+| Policy lifecycle | 4.635 | Reset/end requests and server work |
+| Explicit worker audits | 3.700 | Excludes initial audits inside reset and some final signature work |
+| Evidence writes | 3.822 | Timed worker evidence output |
+| Video writes | 0.000 | Disabled |
+| Environment cleanup | 0.516 | Five environments |
+| Unattributed worker interval | 7.632 | Untimed final signatures, queue/Python work |
+| Worker task total | 1,568.932 | Construction through cleanup |
+| Evaluation outside worker task | 0.786 | Enclosing runtime overhead |
+
+Camera API wall time was **89.876 s**, nested inside native steps, over **67,500
+calls**. The remaining step interval was 718.444 s, **not isolated physics**.
+API host wall time, measured without extra GPU synchronization, is not summed
+GPU kernel time. Never add camera time to step time or worker time to evaluation
+time. Policy-server audit flushes are nested in RPC/lifecycle timings.
+
+The first group's reset-plus-rollout interval was **167.142 s**. The later nine
+had median **148.765 s**, p90 **161.989 s**, range 137.880–173.150 s. These are
+unique native-group intervals, not 50 independent episode latencies: five
+records repeat each group's duration. They exclude some post-group evidence
+work. Later groups are **not steady-state benchmark measurements**, because
+contention changed and background work overlapped.
+
+| Resource / measurement | Available evidence |
 |---|---|
-| `fixed50-01` | Rejected prepared-input mismatch; stopped without completed episode records |
-| `probe-render-01` | Five full episodes per arm; physics/actions/RNG and outcomes exact; full images differ outside verified crop |
-| `ab-02` | Cancelled after an upload timeout; no evaluation evidence accepted |
-| `ab-03` | Native five-slot check running on the final source and marker-2 runtime; result pending |
-| Replacement 50-episode pair | Pending; no completed 50-episode accuracy result |
+| Sampled mean GPU utilization | 15.89%, shared-device observation |
+| Peak GPU memory | 13,789 MiB, shared-device observation |
+| Average GPU memory | Not measured |
+| Mean container CPU use | 2.360 cores, including overlapping work |
+| CPU throttle-time ratio | 0.170% |
+| Isolated rendering/inference GPU kernel time | Not measured |
+| Nsight hardware capture | Unverified; worker timers are separate |
+| B formal timing/resources | Unavailable as a completed result |
 
-**A replacement 50-episode result remains pending.**
-Its completed report must include successes/rates, actual steps and termination
-distribution, missing/duplicate records, worker failures/retries/OOM, camera
-render/reuse calls, Policy batch counts and every exact audit result. Do not
-retain only matching episodes or present partial records as 50 completed trials.
+For the **completed registered trial**, `timing-breakdown.json` records the
+following descriptive intervals. These arms also ran concurrently with audits
+and backups; the shorter arm's exit changed contention for the other's tail.
+**No speedup ratio is inferred from these values.**
 
-A future behavioral pass would establish no observed effective-input, behavior
-or success change on those paired episodes of this fixed-crop model, task and
-profile. A strict full-image pass is a separate stronger result. Neither proves
-unchanged general success probability, full-suite equivalence or native score
-equivalence. Unequal effective inputs, physics, actions/RNG or outcomes cannot
-be excused by a similar aggregate rate. Shared five-slot streams and Policy
-batches also require care before treating outcomes as independent Bernoulli
-samples.
+| Registered-trial interval | `all` seconds | `consumed` seconds |
+|---|---:|---:|
+| End-to-end | 1,565.523 | 1,499.135 |
+| Evaluation | 1,551.117 | 1,483.572 |
+| Policy process/load | 12.010 | 11.962 |
+| Runtime preparation | 0.839 | 0.830 |
+| Environment construction | 26.107 | 25.524 |
+| Resets/initial evidence | 250.095 | 253.381 |
+| Native simulation/observations | 809.042 | 746.329 |
+| Camera API, nested in native steps | 91.079 | 23.800 |
+| Policy round trips | 454.708 | 446.341 |
+| Environment cleanup | 0.360 | 0.529 |
 
-## Available timing fields and their limits
+Native steps, Policy RPC and resets dominate these recorded intervals. Further
+work should quantify baseline variability and retain full failure records, then
+isolate stepping/reset host cost and server inference. Report gains only after
+sequential, uninstrumented, repeated fixed-K/G trials on idle hardware; retune
+K/G separately. No inference or scheduling improvement is included here.
 
-The concurrent audited arms compete for CPU/GPU resources, and the reference
-guard can wait. **No throughput, render-time, step-rate or end-to-end speedup
-ratio is accepted from this correctness experiment.** Shared-device GPU samples
-cannot be attributed to one arm. The following fields exist in actual run
-records; incomplete-run values must remain labelled partial diagnostics.
+## Canonical deployment and evidence
 
-| Field | Meaning |
-|---|---|
-| `phase_timings.policy_load_s` | Policy-process startup/load phase; not isolated weight I/O or GPU upload |
-| `phase_timings.runtime_prepare_s` | Runtime preparation outside evaluated worker execution |
-| `phase_timings.evaluation_s` | Evaluation wall time including worker lifecycle and audited work |
-| `result.elapsed_s`, `end_to_end_wall_s` | Runtime interval and helper interval respectively; helper includes loading/preparation but excludes earlier builds/downloads |
-| `environment_create_s` | Five constructors, native initialization/warm resets and rendering setup |
-| `reset_s` | Evaluated continuation resets plus initial fingerprints |
-| `environment_step_s` | Gym steps: physics, controllers, native observations/conversion and rendering |
-| `camera_render_s` | Nested host wall time in render API calls; not isolated GPU kernel execution |
-| `inference_wait_s` | Policy RPC including protocol, preprocessing, model work, copies and server audit overhead |
-| `observation_build_s`, `action_conversion_s` | Worker history assembly and native action conversion |
-| `policy_lifecycle_s`, `evidence_write_s`, `audit_s` | Explicitly timed requests, writes and audit computations; not a complete partition of audit overhead |
-| `video_write_s`, `environment_close_s` | Video writing and cleanup; videos disabled here |
-| `task_elapsed_s` | Worker construction through cleanup, including uncategorized work and waiting |
-| `physical_steps`, `fresh_observation_steps`, `*_calls` | Work counters, not seconds |
-| Per-record `group_elapsed_s`, `group_reset_s` | One shared five-slot interval copied to five records |
-| Resource/recovery fields | CPU use/throttling, sampled GPU utilization/peak memory and worker/OOM counters |
+The canonical **default `all`** b33 runtime passed self-test. Its 248 source files
+match the frozen Git tree byte for byte; the tested Python/runtime sources match
+as well. Each installed SDK environment (control/inference) has **88 verified
+Python files** matching that commit. The canonical `default-b33-fast` operational
+run, using the original Policy without audits, completed **3/5 successes and
+2,250 physical steps**, with no worker errors. Helper end-to-end was 201.173 s,
+evaluation 187.052 s, Policy startup/load 11.598 s and preparation 0.832 s.
+This default-profile smoke is distinct from the paired diagnostic study; its
+different instrumentation/profile prevents a speed comparison with A50.
 
-Use unique group intervals for latency distributions. Do not sum their five
-record copies or add nested camera time to step time. Initial/final signatures,
-queue publishing, server audit flushing and reference waiting are not all
-isolated by named worker timers. Nsight capture and separate Policy GPU kernel
-attribution remain unverified. Earlier CUDA stream events include host-dispatch
-idle gaps and are not summed kernel execution time.
+The canonical runtime archive was verified by size and SHA256:
 
-After correctness passes, performance requires a separate sequential experiment
-on idle hardware with audit/diagnostic flags disabled, fixed K/G, repeated full
-workloads and separate cold-start/evaluation reporting. Retuning K/G belongs to
-a later experiment. No inference optimization is included here.
+- `tested-runtime.tar.zst`: **14,366,336,823 bytes**.
+- SHA256: `ff22463d073661987d39026922366d41445a658463731f1fd86732e0c367b3cd`.
 
-## Reproduction and evidence
+The archive keeps runtime/environments/source; original source/asset archives
+and external model weights remain in persistent storage separately.
 
-Build a fresh isolated prefix using committed locks and verified caches:
-
-```bash
-KIT_PYTHON=/autodl-fs/data/robocasa365/control/bin/python \
-  ROBOSCOPE_ROBOCASA365_PYTHON=/opt/evostudio/control-runtime/python/bin/python3 \
-  ROBOSCOPE_ROBOCASA365_ASSETS_DIR=/autodl-fs/data/robocasa365/downloads \
-  ROBOSCOPE_ROBOCASA365_SOURCE_CACHE=/autodl-fs/data/robocasa365/downloads \
-  bash benchmarks/robocasa365/build-runtime.sh \
-  /root/autodl-tmp/robocasa365-20261107/runtime-paired-v3 --paired-validation
-```
-
-Each arm uses a schema-2 config launching the committed `audit_policy.py` with
-its own fresh absolute `ROBOCASA365_POLICY_AUDIT` path. Follow the
-[example](../../examples/robocasa365_diffusion/README.md#native-five-slot-smoke)
-with `--task TurnOnElectricKettle --groups 10 --audit-trajectories
---diagnostic-timings`, the same paired manifest/checkpoint and fresh outputs.
-Arm A uses `--render-mode all`; arm B uses `--render-mode consumed` and
-`--pair-reference-output <absolute-arm-A-output>`. A/A controls use `all` twice.
-The rejected `fixed50-01` output paths must not be reused.
-
-Launch commands, runtime/source provenance, logs, initial evidence, worker
-records, Policy audits and comparison outputs remain outside Git under
-`/autodl-fs/data/robocasa365/large-pair/` and the task's local evidence directory.
-Keep `aa-01`, `aa-02`, `fixed50-01`, `probe-render-01` and later attempts distinct.
-Diagnostic summaries include `probe-render-01-summary.json`,
-`probe-render-01-arrays.json`, `checkpoint-crop.json` and
-`effective-contract-check.json`. Rejected/cancelled attempts remain identified
-as such. The completed report must add the final comparison artifact link.
-Weights, assets, raw arrays and bulk logs are not committed.
+Original A50 records/results/timings and surviving failed-B evidence are outside
+Git in local `evidence/large-pair/fixed50-02-preserved/`.
+`final-monitor-summary.json` and `preservation.json` identify available/lost data.
+Full A/A10 records, comparator and Policy audits are in
+`evidence/large-pair/aa-03-preserved/`. The complete registered trial is in
+`evidence/large-pair/fixed50-03-preserved/`, including `primary-outcome`,
+`final-statistics`, `timing-breakdown` JSON/Markdown, original results/Policy
+audits, source inventories and all content-addressed WorkResult snapshots.
+`baseline50-timing.json` records source
+hashes and interval definitions. The verified raw-evidence attachment is
+`robocasa365-correctness-b33-evidence.tar.gz` (**13,196,968 bytes**), retained at
+`/autodl-fs/data/robocasa365/large-pair/` and delivered separately from Git.
+Its SHA256 is
+`58919d014917ac8be288b0195a133c00f86a02b33becb4701d440773b8edaf2e`.
+The bundle includes the registered plan, original records and analysis code;
+its 164 file payloads were checked against the preserved files. Weights, assets,
+bulk logs and arrays are not committed. Missing candidate records from the
+earlier failed attempt are explicitly absent, not rebuilt from baseline outcomes.

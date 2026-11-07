@@ -153,6 +153,13 @@ observation updates; depth, segmentation and custom camera processing are reject
 The benchmark worker also preserves the native odd-step video frames when video
 logging is enabled. Neither the model nor its denoising schedule is changed.
 
+**Consumed mode remains experimental and opt-in.** The registered 50-pair trial
+observed 14/50 successes in each arm, no paired success/step/termination changes,
+and matching covered physical initial conditions/provenance. Secondary effective
+input/action/physics comparisons still failed, as did the multi-group `all`/`all`
+repeatability control. This sample supports no general no-impact guarantee or
+speedup claim. Keep `all` for default evaluation.
+
 For a correctness run, add `--audit-trajectories`: records contain independent
 digests of all consumed features/actions and every physical state/control/success
 transition; per-batch hashes are saved outside Git in the run's evidence folder.
@@ -195,7 +202,20 @@ report may pass only when verified effective inputs, actions/RNG, physical
 trajectories, outcomes and complete provenance/coverage match. This model-specific
 criterion does not establish full-image equality or apply to arbitrary Policies.
 The [rendering study](../../benchmarks/robocasa365/rendering-correctness-20261107.md)
-records the observed border differences and the pending larger validation.
+records the bounded crop evidence, failed earlier candidate/control and the
+completed registered outcome comparison. Full prepared-image failures and effective-input failures
+remain distinct. Before a long run, preserve full WorkResult snapshots outside
+the live queue: SDK automatic retry cleanup can delete partial records, as it
+did in the incomplete 50-episode candidate. Surviving audit digests are not a
+replacement for lost terminal records.
+
+The registered `fixed50-03` trial completed all 50 episodes in both arms after
+omitting only the existing optional raw-observation blocking guard. It changed
+no SDK evaluation code, seeds or scoring rules. Its independent primary validator
+passed all 50 physical reset/provenance checks, full unique coverage and zero
+failures/retries/OOM; raw initial hashes also matched. The recorded-sample
+success result passed while the strict/effective/trajectory results remained
+failed. See the study for the complete paired table, source and limitations.
 
 ## Native comparison
 

@@ -73,7 +73,7 @@ PY
 Capture starts when the Worker opens the `episode` range. Most workers do this through
 `PolicyClient`; RoboCasa365 keeps one range open around its complete native episode group. The Policy Server does not run under `nsys`: its own GPU time
 is not in the report, only the round-trip time of each request.
-RoboCasa365 opens its range after the five environment resets and before Policy
+RoboCasa365 opens its range after its group environment resets and before Policy
 reset calls. Construction/reset attribution uses separate worker wall timers;
 audited correctness runs do not establish verified Nsight coverage.
 
@@ -84,7 +84,7 @@ audited correctness runs do not establish verified Nsight coverage.
 | MetaWorld | Yes | Not yet |
 | robomimic | Yes | Not yet |
 | RoboCasa | Yes | Not yet |
-| RoboCasa365 | Yes; first native group after environment resets | Nsight not yet; worker/camera timers and state/Policy audits verified separately (2026-11-07, Kit 0.8.0b33) |
+| RoboCasa365 | Yes; first native group after environment resets | Nsight not yet; timers/audit collection exercised, multi-group repeatability failed (2026-11-07, Kit 0.8.0b33) |
 | CALVIN | Yes | Not yet |
 | RoboTwin | No, its launcher has its own client | Records nothing |
 
@@ -104,20 +104,20 @@ audited correctness runs do not establish verified Nsight coverage.
 Each benchmark keeps its profiling findings in its own documentation, newest first, with the date, machine,
 configuration, and Kit version:
 
-- [RoboCasa365 rendering correctness](https://github.com/MINT-SJTU/RoboScope-Kit/blob/main/benchmarks/robocasa365/rendering-correctness-20261107.md):
-  owning-EGL-context cleanup prevents multi-slot resets from freeing another slot's rendering
-  resources. This supersedes b31/b32 multi-slot scores and timing baselines in the
-  [small-scale study](https://github.com/MINT-SJTU/RoboScope-Kit/blob/main/benchmarks/robocasa365/runtime-optimization-20261107.md).
-  The common stable-region/RNG profile passed a five-episode `all`/`all` control. A complete
-  five-slot diagnostic matched 450-step trajectories, all 57 action/RNG batches and 3/5 successes
-  in both modes. Three prepared left-camera history rows differed only outside the checkpoint's
-  verified 224×224 center crop; 105 captured crop checks were exact. Full-image equality still
-  fails and is retained separately from model-specific effective-input/behavioral checks.
-  Marker-2 cleanup now preserves foreign EGL thread bindings in both arms; it is not established
-  as the border-difference cause. The final-runtime check and replacement 50-episode pair remain
-  pending (2026-11-07, RTX 4090, Kit 0.8.0b33, K=1/G=1 per arm). The validation profile changes
-  seed-to-scene mapping. Concurrent audited timings cannot establish a speedup. Camera API
-  timers are nested host wall time; Policy GPU kernel attribution and Nsight capture remain unverified.
+- [RoboCasa365 rendering correctness and timing](https://github.com/MINT-SJTU/RoboScope-Kit/blob/main/benchmarks/robocasa365/rendering-correctness-20261107.md):
+  the preregistered 50-pair Kettle trial completed with 14/50 successes (28%) in each arm,
+  no discordant successes or step/termination changes, matching covered physical reset/provenance
+  and zero failures/retries/OOM (2026-11-07, RTX 4090, Kit 0.8.0b33, K=1/G=1 per arm).
+  This is a recorded-sample outcome result; strict/effective/trajectory audits still fail,
+  including 19 physical/action episode differences, and a multi-group `all`/`all` control also
+  diverged. Earlier `fixed50-02` candidate execution failed and lost partial records on retry;
+  that failed study remains documented. Its completed `all` arm's descriptive timers measured
+  808.320 s in native steps, 464.856 s in Policy RPC and 248.004 s in resets; camera API
+  wall time 89.876 s is nested in native steps. Final camera calls were 67,500 versus 17,100.
+  Concurrent audited timings are not idle/steady measurements and establish no speedup or
+  general accuracy guarantee. Both profiles include EGL ownership/binding cleanup; the
+  validation profile changes seed-to-scene mapping. Earlier b31/b32 multi-slot baselines are
+  superseded. Policy GPU kernel attribution, average VRAM and Nsight capture remain unverified.
 - [RoboCasa365](https://github.com/MINT-SJTU/RoboScope-Kit/blob/main/benchmarks/robocasa365/validation-20261107.md#worker-phase-measurements):
   worker phase timers on an RTX 4090 found 65.05 s in Policy round trips and 47.02 s in
   simulation/observations/rendering for a real 900-step smoke episode (2026-11-07, Kit 0.8.0b31,

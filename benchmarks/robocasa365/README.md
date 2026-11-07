@@ -34,6 +34,9 @@ Both build profiles include an owning-EGL-context cleanup fix: destroying an old
 renderer must bind its own GL context before freeing context-local GPU resources.
 Without that bind, sequential resets of five environments in one process can
 destroy another slot's framebuffers and produce corrupted observations.
+Marker-2 cleanup also restores the interrupted EGL API/context/surfaces after
+delayed destruction. Per-context cleanup no longer releases another renderer's
+thread binding. Both profiles include these corrections.
 
 For strict rendering experiments, build a **separate** prefix with
 `--paired-validation`. This adds stable Counter reset-region deduplication and
@@ -43,6 +46,16 @@ but stable ordering changes the previous identity-dependent seed-to-scene map.
 The generated manifest declares `paired-stable-regions-v1`, and results are
 always `full_suite: false`; this is a common validation setup, not an official
 target50 score. Cross-profile reuse of an existing prefix is rejected.
+
+**Consumed-frame rendering is experimental; `all` remains the default.** The
+registered full 50-pair trial completed with 14/50 successes (28%) in each arm,
+zero discordant successes, and identical steps/termination after all physical
+reset/provenance checks passed. This is no observed task-success change in that
+sample, not an absolute or full-suite accuracy guarantee. Secondary input/action/
+physics audits still failed, and a multi-group `all`/`all` control also diverged;
+optimization causality and speedup remain unproven. The
+[study](rendering-correctness-20261107.md) retains the earlier failed/incomplete
+attempts and record-loss limits alongside the registered result.
 
 Configure the example with absolute interpreter and source paths, and a model
 directory containing `model.ckpt` and `clip/`. In an adaptation container the
@@ -95,7 +108,10 @@ measured results and their limits here before making those claims.
 real one-slot and five-slot smoke runs, exact native first-batch comparison,
 worker phase measurements and remaining full-suite acceptance work.
 
-The [small-scale runtime study](runtime-optimization-20261107.md) records task
-screening, phase attribution, the opt-in consumed-frame rendering experiment and
-its correctness/performance evidence. Use the example's `--task` and `--groups`
-options for iteration before expanding the task matrix.
+The [small-scale runtime study](runtime-optimization-20261107.md) preserves
+earlier diagnostics; its multi-slot baselines are superseded by the renderer
+correction. The [final study](rendering-correctness-20261107.md) records the
+complete baseline, failed candidate/control comparisons, partial-record loss,
+descriptive timings and canonical default-profile operational check. Use the
+example's `--task` and `--groups` for bounded iteration, and retain full records
+outside the live queue before automatic retry cleanup can remove them.
