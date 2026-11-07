@@ -52,6 +52,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--render-mode", choices=("all", "consumed"), default="all")
     parser.add_argument("--audit-trajectories", action="store_true")
     parser.add_argument("--diagnostic-timings", action="store_true")
+    parser.add_argument("--pair-reference-output", type=Path)
+    parser.add_argument("--pair-reference-timeout-s", type=float, default=900.0)
     return parser.parse_args()
 
 
@@ -76,6 +78,8 @@ def main() -> int:
     adapter = RoboCasa365BenchmarkAdapter(replace(
         reference.config, tasks=(args.task,), save_videos=False, render_mode=args.render_mode,
         audit_trajectories=args.audit_trajectories, diagnostic_timings=args.diagnostic_timings,
+        pair_reference_output=args.pair_reference_output,
+        pair_reference_timeout_s=args.pair_reference_timeout_s,
     ))
     ready_timeout = float(manifest.defaults.get("ready_timeout_s", 900))
     inference = PolicyProcessAdapter(

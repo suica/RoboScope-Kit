@@ -1,5 +1,12 @@
 # RoboCasa365 integration validation — 2026-11-07
 
+**Later correction:** multi-slot hard resets exposed an upstream EGL resource
+cleanup bug that could corrupt later step images in the first four slots.
+Initial captures/first-action comparisons were unaffected, but the old five-slot
+smoke score is not a corrected-renderer baseline. See the
+[large rendering correctness study](rendering-correctness-20261107.md) and the
+source-pinned owning-context cleanup patch in Kit 0.8.0b33.
+
 The simulator, official multi-task Diffusion Policy, SDK lifecycle and real
 evaluation loop run in the adaptation container. This is integration readiness
 evidence, not a completed 50-task evaluation, a leaderboard score reproduction,

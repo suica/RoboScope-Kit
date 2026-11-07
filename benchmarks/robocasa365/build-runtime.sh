@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # Build the isolated RoboCasa365 (PandaOmron) simulator, never the GR1 runtime.
-# Usage: build-runtime.sh <install-dir> [--environment-only]
+# Usage: build-runtime.sh <install-dir> [--environment-only] [--paired-validation]
 # The optional mode prepares imports while assets are being downloaded; it does
 # not install a benchmark manifest or claim that a usable runtime was built.
 # Normal builds require all committed asset checksums and finish with --self-test.
@@ -13,17 +13,24 @@ set -Eeuo pipefail
 # interpreter path. Its installation must remain available to the resulting venv.
 # ROBOSCOPE_PYPI_INDEX may select a package mirror (default: official PyPI);
 # package versions and simulator pins remain fixed.
+# --paired-validation requires an isolated prefix and adds stable Counter region
+# ordering to BOTH validation arms. Its manifest is explicitly validation-only;
+# it cannot be reused by the default camera-only build profile.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-[[ $# -ge 1 && $# -le 2 ]] || {
-  echo "usage: $0 <install-dir> [--environment-only]" >&2
+[[ $# -ge 1 && $# -le 3 ]] || {
+  echo "usage: $0 <install-dir> [--environment-only] [--paired-validation]" >&2
   exit 2
 }
 ENVIRONMENT_ONLY=0
-if [[ $# -eq 2 ]]; then
-  [[ "$2" == "--environment-only" ]] || { echo "unknown option: $2" >&2; exit 2; }
-  ENVIRONMENT_ONLY=1
-fi
+PROFILE=default
+for option in "${@:2}"; do
+  case "${option}" in
+    --environment-only) ENVIRONMENT_ONLY=1 ;;
+    --paired-validation) PROFILE=paired ;;
+    *) echo "unknown option: ${option}" >&2; exit 2 ;;
+  esac
+done
 [[ "$(uname -s):$(uname -m)" == "Linux:x86_64" ]] || {
   echo "RoboCasa365 runtime builds require Linux x86_64" >&2
   exit 3
@@ -47,6 +54,10 @@ export UV_PYTHON_INSTALL_DIR="${INSTALL_DIR}/python"
 export PIP_CONFIG_FILE=/dev/null
 export PYTHONNOUSERSITE=1
 export PYTHONDONTWRITEBYTECODE=1
+
+# Reject a cross-profile prefix before package installation or source mutation.
+"${KIT_PYTHON}" -I "${SCRIPT_DIR}/apply-runtime-patches.py" \
+  --source-root "${SOURCE_ROOT}" --profile "${PROFILE}" --check-profile
 
 if [[ "${ENVIRONMENT_ONLY}" -eq 0 ]]; then
   "${KIT_PYTHON}" -c 'import roboscope_kit' || {
@@ -86,7 +97,7 @@ fi
 "${PYTHON}" -I "${SCRIPT_DIR}/install-sources.py" \
   --source-root "${SOURCE_ROOT}" \
   --cache-dir "${ROBOSCOPE_ROBOCASA365_SOURCE_CACHE:-${INSTALL_DIR}/source-cache}" \
-  --check-inputs
+  --profile "${PROFILE}" --check-inputs
 # CPU torch is required by RoboCasa's imported playback utilities, although
 # simulation itself uses MuJoCo/EGL. Policy inference has its own environment.
 "${UV_BIN}" pip install --python "${PYTHON}" --no-progress --no-deps \
@@ -97,9 +108,10 @@ fi
 
 "${PYTHON}" -I "${SCRIPT_DIR}/install-sources.py" \
   --source-root "${SOURCE_ROOT}" \
-  --cache-dir "${ROBOSCOPE_ROBOCASA365_SOURCE_CACHE:-${INSTALL_DIR}/source-cache}"
+  --cache-dir "${ROBOSCOPE_ROBOCASA365_SOURCE_CACHE:-${INSTALL_DIR}/source-cache}" \
+  --profile "${PROFILE}"
 "${PYTHON}" -I "${SCRIPT_DIR}/apply-runtime-patches.py" \
-  --source-root "${SOURCE_ROOT}"
+  --source-root "${SOURCE_ROOT}" --profile "${PROFILE}"
 # These checkouts declare training, dataset-conversion and device extras that
 # evaluation never imports. Use the explicit runtime lock instead of resolving
 # lerobot / tianshou / pynput / hidapi / pygame or changing the pinned simulator's
@@ -139,11 +151,24 @@ fi
 "${PYTHON}" -I "${SCRIPT_DIR}/build-assets.py" \
   --source-root "${SOURCE_ROOT}/robocasa" \
   --cache-dir "${ROBOSCOPE_ROBOCASA365_ASSETS_DIR:-${INSTALL_DIR}/downloads}"
-install -m 0644 "${SCRIPT_DIR}/benchmark-manifest.json" "${INSTALL_DIR}/benchmark-manifest.json"
+"${PYTHON}" -I - "${SCRIPT_DIR}/benchmark-manifest.json" \
+  "${INSTALL_DIR}/benchmark-manifest.json" "${PROFILE}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+source, destination = map(Path, sys.argv[1:3])
+value = json.loads(source.read_text(encoding="utf-8"))
+if sys.argv[3] == "paired":
+    value["defaults"]["runtime_profile"] = "paired-stable-regions-v1"
+    value["defaults"]["full_suite"] = False
+Path(destination).write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+PY
 install -m 0644 "${SCRIPT_DIR}/asset-inputs.json" "${INSTALL_DIR}/asset-inputs.json"
 SELF_TEST_OUTPUT="$(mktemp -d "${INSTALL_DIR}/self-test.XXXXXX")"
 "${KIT_PYTHON}" -m roboscope_kit.runtime.benchmark --benchmark robocasa365 --self-test \
   --benchmark-manifest "${INSTALL_DIR}/benchmark-manifest.json" \
   --output-dir "${SELF_TEST_OUTPUT}"
 echo "Built RoboCasa365 runtime and passed Kit self-test: ${INSTALL_DIR}"
+echo "Runtime build profile: ${PROFILE}"
 echo "Self-test evidence: ${SELF_TEST_OUTPUT}"

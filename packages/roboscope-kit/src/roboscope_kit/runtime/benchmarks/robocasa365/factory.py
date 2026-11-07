@@ -63,6 +63,10 @@ class RoboCasa365BenchmarkFactory:
 
     def self_test(self, manifest: BenchmarkManifest, output_dir: Path) -> dict[str, Any]:
         self._validate_manifest(manifest)
+        profile = str(manifest.defaults.get("runtime_profile", "official"))
+        if profile not in {"official", "paired-stable-regions-v1"}:
+            raise ValueError("unsupported RoboCasa365 runtime profile")
+        marker = "xml-insertion-v1" if profile == "paired-stable-regions-v1" else None
         python = manifest.runtime_path("python")
         root = manifest.runtime_path("benchmark_root")
         if not python.is_file() or not (root / "robocasa" / "wrappers" / "gym_wrapper.py").is_file():
@@ -73,6 +77,10 @@ class RoboCasa365BenchmarkFactory:
              "validate_upstream(); import robocasa.wrappers.gym_wrapper; "
              "from robosuite.environments.robot_env import RobotEnv; "
              "assert RobotEnv._roboscope_camera_gate_version == 1; "
+             "from robosuite.utils.binding_utils import MjRenderContext; "
+             "assert MjRenderContext._roboscope_owning_context_cleanup == 2; "
+             "from robocasa.models.fixtures.counter import Counter; "
+             f"assert getattr(Counter, '_roboscope_reset_region_order', None) == {marker!r}; "
              "print('RoboCasa365 imports and frozen registry passed')"),
             check=True, cwd=root,
             env={**os.environ, "PYTHONPATH": str(kit_import_root()), "MUJOCO_GL": "egl"},
@@ -83,6 +91,8 @@ class RoboCasa365BenchmarkFactory:
             "suites": list(SUITES), "task_count": len(SUITES["target50"]),
             "registry_verified": True, "simulator_episode_tested": False,
             "camera_gate_version": 1,
+            "owning_context_cleanup_version": 2,
+            "runtime_profile": profile, "formal_result_eligible": profile == "official",
         }
 
     @staticmethod
@@ -112,4 +122,5 @@ class RoboCasa365BenchmarkFactory:
             cpu_threads=int(manifest.defaults.get("client_cpu_threads", 1)),
             save_videos=bool(manifest.defaults.get("save_videos", False)),
             render_mode=str(manifest.defaults.get("render_mode", "all")),
+            runtime_profile=str(manifest.defaults.get("runtime_profile", "official")),
         ))

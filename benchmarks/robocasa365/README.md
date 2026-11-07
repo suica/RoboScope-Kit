@@ -30,6 +30,20 @@ a usable asset-backed runtime. Normal builds verify all asset hashes and finish
 with the Kit self-test. Downloads use GET: Box may reject HEAD for valid links.
 An existing verified ZIP cache can be transferred from another machine.
 
+Both build profiles include an owning-EGL-context cleanup fix: destroying an old
+renderer must bind its own GL context before freeing context-local GPU resources.
+Without that bind, sequential resets of five environments in one process can
+destroy another slot's framebuffers and produce corrupted observations.
+
+For strict rendering experiments, build a **separate** prefix with
+`--paired-validation`. This adds stable Counter reset-region deduplication and
+forwards the intended RNG to stack-base fixtures, equally in both experiment
+arms. It retains candidate membership and does not add environment RNG draws,
+but stable ordering changes the previous identity-dependent seed-to-scene map.
+The generated manifest declares `paired-stable-regions-v1`, and results are
+always `full_suite: false`; this is a common validation setup, not an official
+target50 score. Cross-profile reuse of an existing prefix is rejected.
+
 Configure the example with absolute interpreter and source paths, and a model
 directory containing `model.ckpt` and `clip/`. In an adaptation container the
 configuration can be `/workspace/evostudio-policy.json`.

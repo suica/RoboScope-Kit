@@ -8,7 +8,71 @@
       "patch": "patches/camera-rgb-reuse.patch",
       "patch_sha256": "4a47631f5eb7a2d2b29ee1ea2cba1493e477768716f13fa6a6408c6365617998",
       "original_sha256": "d0ea6403d2ba499189a07ca5646ed0002a3e13b4a40bb75923958b7d467dd0d9",
-      "patched_sha256": "a6449d5fb41418e51f06e653aa0688547ce97df72ef3dc039076e69a6d3a4d16"
+      "patched_sha256": "a6449d5fb41418e51f06e653aa0688547ce97df72ef3dc039076e69a6d3a4d16",
+      "id": "camera-rgb-reuse"
+    },
+    {
+      "id": "owning-egl-context-cleanup",
+      "source": "robosuite",
+      "revision": "5ce6643f3092639d08f7b0f90ed1c6a84f50552c",
+      "path": "robosuite/utils/binding_utils.py",
+      "patch": "patches/owning-egl-context-cleanup.patch",
+      "patch_sha256": "f74957cfab6e2201798436e29df935ce4b451f39573544cfc922691a444201de",
+      "original_sha256": "a3d2526fb2e60875e2c3a87b8828b8e3b512781708c80d0c96ee6024980896c8",
+      "patched_sha256": "24672892427a0c14e478f59409e0f824c9d8781376628678a78108c4d50d089a"
+    },
+    {
+      "id": "preserve-egl-thread-state",
+      "source": "robosuite",
+      "revision": "5ce6643f3092639d08f7b0f90ed1c6a84f50552c",
+      "path": "robosuite/renderers/context/egl_context.py",
+      "patch": "patches/preserve-egl-thread-state.patch",
+      "patch_sha256": "205b1e6f957908a62785d596f6cea5454c592b5b8cb41ff360b42be4c7123f7c",
+      "original_sha256": "72ff1e153da85b85a35ebd0350c4693d3b89ffd5e1f13ff49813b7a3ad4c51c6",
+      "patched_sha256": "c56e7e2a030d2d6ee41f0ad323afa6137ed093e55632bdd285295b2660e19e1a"
+    },
+    {
+      "id": "paired-stable-counter-regions",
+      "source": "robocasa",
+      "revision": "3443cdf3dd20f9ae8ed41adba442059b506891d0",
+      "path": "robocasa/models/fixtures/counter.py",
+      "patch": "patches/paired-stable-counter-regions.patch",
+      "patch_sha256": "08b6fa23cffc2aaed5eae99e941fc270a4bcf5c507a278c58e571dc9d3b6ba42",
+      "original_sha256": "77f992d01aa1ae5f21ed7f170d0aab9c303c32148f4b427651c04912be8ce68a",
+      "patched_sha256": "df05bcab04ed67795ddd54d88a273404a1c4ca4677379e2699f08e6de94cef0d"
+    },
+    {
+      "id": "paired-stack-base-rng",
+      "source": "robocasa",
+      "revision": "3443cdf3dd20f9ae8ed41adba442059b506891d0",
+      "path": "robocasa/models/fixtures/fixture_stack.py",
+      "patch": "patches/paired-stack-base-rng.patch",
+      "patch_sha256": "d84f1b3120a1bae0d0d9bc577c9c8556efc88434162ac254e9d8a468b090e999",
+      "original_sha256": "0aace4b1869befd8426854908276a06366948cd538d05e5fc11185a0c71a7822",
+      "patched_sha256": "d9fcef46e415fc34cdf1b45543e91af927ba6e0e2042eb23429716c078c87003"
     }
-  ]
+  ],
+  "profiles": {
+    "default": {
+      "runtime_profile": "camera-only-v1",
+      "validation_only": false,
+      "patches": [
+        "camera-rgb-reuse",
+        "owning-egl-context-cleanup",
+        "preserve-egl-thread-state"
+      ]
+    },
+    "paired": {
+      "runtime_profile": "paired-stable-regions-v1",
+      "validation_only": true,
+      "full_suite": false,
+      "patches": [
+        "camera-rgb-reuse",
+        "owning-egl-context-cleanup",
+        "preserve-egl-thread-state",
+        "paired-stable-counter-regions",
+        "paired-stack-base-rng"
+      ]
+    }
+  }
 }

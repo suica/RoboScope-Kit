@@ -41,7 +41,7 @@ def read_inputs(path: Path) -> dict:
     return inputs
 
 
-def verify_source(destination: Path, spec: dict) -> None:
+def verify_source(destination: Path, spec: dict, profile: str = "default") -> None:
     marker = destination / RECORD_NAME
     if not marker.is_file():
         raise RuntimeError(
@@ -53,9 +53,13 @@ def verify_source(destination: Path, spec: dict) -> None:
     patch_inputs = json.loads(Path(__file__).with_name("runtime-patches.json").read_text(encoding="utf-8"))
     if patch_inputs.get("schema_version") != 1:
         raise ValueError("Expected runtime patch input schema 1")
+    selected = patch_inputs["profiles"][profile]["patches"]
     reviewed = {
-        patch["path"]: patch for patch in patch_inputs["patches"]
-        if patch["source"] == destination.name and patch["revision"] == spec["revision"]
+        patch["path"]: patch
+        for patch in patch_inputs["patches"]
+        if patch["source"] == destination.name
+        and patch["revision"] == spec["revision"]
+        and patch["id"] in selected
     }
     for relative, digest in record["files"].items():
         path = destination / relative
@@ -139,6 +143,7 @@ def main() -> None:
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--cache-dir", required=True, type=Path)
     parser.add_argument("--check-inputs", action="store_true")
+    parser.add_argument("--profile", choices=("default", "paired"), default="default")
     args = parser.parse_args()
     inputs = read_inputs(args.inputs)
     if args.check_inputs:
@@ -149,7 +154,7 @@ def main() -> None:
     for name, spec in inputs["sources"].items():
         destination = args.source_root / name
         if destination.exists():
-            verify_source(destination, spec)
+            verify_source(destination, spec, args.profile)
         else:
             install_source(obtain_archive(spec, args.cache_dir), destination, spec)
 

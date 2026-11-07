@@ -46,6 +46,9 @@ class RoboCasa365RuntimeConfig:
     render_mode: str = "all"
     audit_trajectories: bool = False
     diagnostic_timings: bool = False
+    runtime_profile: str = "official"
+    pair_reference_output: Path | None = None
+    pair_reference_timeout_s: float = 900.0
 
     def __post_init__(self) -> None:
         if self.suite not in SUITES:
@@ -64,6 +67,16 @@ class RoboCasa365RuntimeConfig:
             raise ValueError("RoboCasa365 cpu_threads must be positive")
         if self.render_mode not in {"all", "consumed"}:
             raise ValueError("RoboCasa365 render_mode must be all or consumed")
+        if self.runtime_profile not in {"official", "paired-stable-regions-v1"}:
+            raise ValueError("unsupported RoboCasa365 runtime profile")
+        if self.pair_reference_output is not None and (
+            not self.pair_reference_output.is_absolute()
+            or self.runtime_profile != "paired-stable-regions-v1" or not self.audit_trajectories
+            or self.native_envs != NATIVE_ENVS
+        ):
+            raise ValueError("a paired reference requires absolute output, the validation profile and audits")
+        if not 0 < self.pair_reference_timeout_s <= 3600:
+            raise ValueError("paired reference timeout must be in (0, 3600] seconds")
 
     @property
     def full_suite(self) -> bool:
@@ -71,6 +84,7 @@ class RoboCasa365RuntimeConfig:
             self.tasks == SUITES[self.suite]
             and self.episodes_per_task == EPISODES_PER_TASK
             and self.native_envs == NATIVE_ENVS
+            and self.runtime_profile == "official"
         )
 
 
@@ -109,6 +123,10 @@ class RoboCasa365BenchmarkAdapter:
                 "--worker-state-dir", str(context.state_dir),
                 "--output-dir", str(context.output_dir),
                 "--render-mode", self.config.render_mode,
+                "--runtime-profile", self.config.runtime_profile,
+                *(("--pair-reference-output", str(self.config.pair_reference_output),
+                   "--pair-reference-timeout-s", str(self.config.pair_reference_timeout_s))
+                  if self.config.pair_reference_output is not None else ()),
                 *(("--save-videos",) if self.config.save_videos else ()),
                 *(("--audit-trajectories",) if self.config.audit_trajectories else ()),
                 *(("--diagnostic-timings",) if self.config.diagnostic_timings else ()),
@@ -199,6 +217,8 @@ class RoboCasa365BenchmarkAdapter:
             "render_mode": self.config.render_mode,
             "audit_trajectories": self.config.audit_trajectories,
             "diagnostic_timings": self.config.diagnostic_timings,
+            "runtime_profile": self.config.runtime_profile,
+            "paired_initial_guard": self.config.pair_reference_output is not None,
             "scenario_plan": scenario_plan(
                 self.config.tasks, self.config.episodes_per_task, self.config.native_envs
             ),

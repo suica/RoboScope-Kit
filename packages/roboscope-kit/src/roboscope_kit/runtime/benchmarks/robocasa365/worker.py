@@ -52,6 +52,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--render-mode", choices=("all", "consumed"), default="all")
     parser.add_argument("--audit-trajectories", action="store_true")
     parser.add_argument("--diagnostic-timings", action="store_true")
+    parser.add_argument(
+        "--runtime-profile", choices=("official", "paired-stable-regions-v1"), default="official"
+    )
+    parser.add_argument("--pair-reference-output", type=Path)
+    parser.add_argument("--pair-reference-timeout-s", type=float, default=900.0)
     parser.add_argument("--poll-interval", type=float, default=0.05)
     return parser.parse_args()
 
@@ -111,7 +116,7 @@ def _json_default(value):
     raise TypeError(f"unsupported scenario metadata type {type(value).__name__}")
 
 
-def reset_fingerprint(environment, observation: Observation) -> dict[str, Any]:
+def reset_fingerprint(environment, observation: Observation, *, complete: bool = False) -> dict[str, Any]:
     native = environment.unwrapped.env
     state = np.asarray(native.sim.get_state().flatten(), dtype=np.float64)
     meta = json.dumps(native.get_ep_meta(), sort_keys=True, default=_json_default, separators=(",", ":"))
@@ -119,11 +124,24 @@ def reset_fingerprint(environment, observation: Observation) -> dict[str, Any]:
     for key, value in sorted(observation.features.items()):
         features.update(key.encode())
         features.update(value.encode() if isinstance(value, str) else value.tobytes())
-    return {
+    result = {
         "initial_state_sha256": hashlib.sha256(state.tobytes()).hexdigest(),
         "scenario_metadata_sha256": hashlib.sha256(meta.encode()).hexdigest(),
         "initial_observation_sha256": features.hexdigest(),
     }
+    if complete:
+        from .audit import initial_signatures
+        from .audit_state import native_control_signature, rng_signature, sensor_schedule_signature
+
+        result.update(initial_signatures(environment))
+        for key, signature in (
+            ("initial_rng", rng_signature(native)),
+            ("initial_controller", native_control_signature(native)),
+            ("initial_sensor_schedule", sensor_schedule_signature(native)),
+        ):
+            result[f"{key}_sha256"] = signature["sha256"]
+            result[f"{key}_coverage"] = signature["coverage"]
+    return result
 
 
 def save_first_batch(args: argparse.Namespace, task: str, observations: tuple, chunks: tuple) -> None:
@@ -148,7 +166,15 @@ def feature_digest(observation: Observation) -> bytes:
 
 
 def configure_rendering(environment, args: argparse.Namespace) -> None:
+    from robocasa.models.fixtures.counter import Counter
+
     native = environment.unwrapped.env
+    if getattr(native.sim._render_context_offscreen, "_roboscope_owning_context_cleanup", None) != 2:
+        raise RuntimeError("rebuild RoboCasa365 runtime with the owning-context cleanup patch")
+    profile = getattr(args, "runtime_profile", "official")
+    stable_regions = getattr(Counter, "_roboscope_reset_region_order", None)
+    if (profile == "paired-stable-regions-v1") != (stable_regions == "xml-insertion-v1"):
+        raise RuntimeError("RoboCasa365 runtime profile differs from the installed reset-region patch")
     if (args.render_mode == "consumed" or args.diagnostic_timings) and (
         getattr(native, "_roboscope_camera_gate_version", None) != 1
     ):
@@ -158,6 +184,8 @@ def configure_rendering(environment, args: argparse.Namespace) -> None:
             raise RuntimeError("consumed rendering requires the pinned headless ignore_done runtime")
         if any(native.camera_depths) or any(native.camera_segmentations):
             raise RuntimeError("consumed rendering supports RGB without depth or segmentation")
+        if native.sim.model._model.nplugin:
+            raise RuntimeError("consumed rendering requires a model without visualization plugins")
     native._roboscope_measure_camera_render = args.diagnostic_timings
 
 
@@ -186,14 +214,26 @@ def run_group(
     reset_started = time.perf_counter()
     with environment_range("environment.reset"):
         for slot, environment in enumerate(environments):
+            rng_before = None
+            if args.audit_trajectories:
+                from .audit_state import rng_signature
+
+                rng_before = rng_signature(environment.unwrapped.env)["sha256"]
             # Native labels are not reset seeds: continue the constructor stream.
             native, _ = environment.reset()
             history = deque((native, native), maxlen=OBSERVATION_STEPS)
             histories.append(history)
             fingerprints.append(reset_fingerprint(
-                environment, build_observation(identifiers[slot], 0, history)
+                environment, build_observation(identifiers[slot], 0, history),
+                complete=args.audit_trajectories,
             ))
+            if rng_before is not None:
+                fingerprints[-1]["rng_before_reset_sha256"] = rng_before
     reset_s = time.perf_counter() - reset_started
+    if args.audit_trajectories:
+        from .pairing import publish_and_check_initial
+
+        publish_and_check_initial(args, task.name, stream_episode, identifiers, fingerprints)
     cameras_before = camera_counters(environments)
     started = time.perf_counter()
     steps = [0] * count
@@ -211,7 +251,9 @@ def run_group(
     inference_calls = 0
     fresh_observation_steps = 0
     hashes = [
-        {key: hashlib.sha256() for key in ("physical_state", "policy_observations", "policy_actions")}
+        {key: hashlib.sha256() for key in (
+            "physical_state", "integration_state", "policy_observations", "policy_actions",
+        )}
         for _ in environments
     ] if args.audit_trajectories else []
     audit_batches = []
@@ -312,12 +354,17 @@ def run_group(
                         successes[slot] |= success
                         dones[slot] = bool(terminated or truncated or steps[slot] >= task.horizon)
                         if args.audit_trajectories:
+                            from .audit import integration_state_bytes
+
                             audit_started = time.perf_counter()
                             digest = hashes[slot]["physical_state"]
                             state = np.asarray(native_env.sim.get_state().flatten(), dtype=np.float64)
                             digest.update(state.tobytes())
                             digest.update(np.asarray(native_env.sim.data.ctrl, dtype=np.float64).tobytes())
                             digest.update(bytes((success, dones[slot])))
+                            integration = hashes[slot]["integration_state"]
+                            integration.update(integration_state_bytes(native_env))
+                            integration.update(bytes((success, dones[slot])))
                             audit_s += time.perf_counter() - audit_started
                         # Native VideoRecordingWrapper starts its counter at 1
                         # after reset, so a 20 Hz / 10 fps run records steps 1, 3, ...
@@ -344,14 +391,26 @@ def run_group(
                 if profiling.ENABLED:
                     profiling.episode_end()
     elapsed_s = time.perf_counter() - started
+    end_signatures = [{} for _ in environments]
     if args.audit_trajectories:
+        from .audit_state import native_control_signature, rng_signature, sensor_schedule_signature
+
+        for slot, environment in enumerate(environments):
+            native_env = environment.unwrapped.env
+            end_signatures[slot] = {
+                "final_rng_sha256": rng_signature(native_env)["sha256"],
+                "final_controller_sha256": native_control_signature(native_env)["sha256"],
+                "final_sensor_schedule_sha256": sensor_schedule_signature(native_env)["sha256"],
+            }
         evidence_started = time.perf_counter()
         path = (
             args.output_dir / "evidence" / f"worker-{args.worker_id:03d}"
             / f"{task.name}-group-{stream_episode:02d}-audit.json"
         )
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"task": task.name, "batches": audit_batches}, separators=(",", ":")))
+        path.write_text(json.dumps({
+            "schema_version": 2, "task": task.name, "batches": audit_batches,
+        }, separators=(",", ":")))
         evidence_s += time.perf_counter() - evidence_started
     records = [
         EvaluationRecord(
@@ -364,9 +423,11 @@ def run_group(
                 "horizon": task.horizon, "termination": termination,
                 "group_elapsed_s": elapsed_s, "group_reset_s": reset_s,
                 "render_mode": args.render_mode,
+                "runtime_profile": args.runtime_profile,
                 **({"trajectory_sha256": {key: value.hexdigest() for key, value in hashes[slot].items()}}
                    if args.audit_trajectories else {}),
                 **fingerprints[slot],
+                **end_signatures[slot],
             },
         )
         for slot in range(count)

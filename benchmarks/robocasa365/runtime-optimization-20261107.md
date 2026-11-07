@@ -1,5 +1,13 @@
 # RoboCasa365 small-scale runtime study — 2026-11-07
 
+**Superseded multi-slot baseline:** subsequent investigation found that upstream
+renderer cleanup could free another slot's GL resources during sequential hard
+resets. The first four slots could consequently receive corrupted step images,
+even when initial images and physical states matched. The multi-slot timings and
+scores below are historical diagnostics, not valid corrected-renderer reference
+scores or performance baselines. The owning-context fix is common to both arms
+of the later [large correctness study](rendering-correctness-20261107.md).
+
 This study uses the integration machine, source/checkpoint pins and dependencies
 recorded in [integration validation](validation-20261107.md), with Kit 0.8.0b32.
 Trials retain native five-slot batches, pretrain scenes, constructor streams,

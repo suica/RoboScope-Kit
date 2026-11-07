@@ -160,6 +160,43 @@ transition; per-batch hashes are saved outside Git in the run's evidence folder.
 is a subset of environment-step time, not a separate additive phase or isolated
 GPU kernel time. Disable both diagnostic flags in repeated timing comparisons.
 
+For large paired correctness runs, use the isolated `--paired-validation`
+simulator profile and `--groups 10` (50 episodes on one task). Both arms must use
+the same common reset-region/RNG fixes and the owning-context renderer cleanup.
+Use `--audit-trajectories` in both arms. The worker records full MuJoCo
+`mjSTATE_INTEGRATION` transitions, compiled model primitives/options/statistics,
+located RNG states, covered controller fields and sensor schedules. Every
+signature declares its coverage; it is not a complete Python object clone.
+
+The optional `--pair-reference-output <baseline-output>` requires exact initial
+group signatures before the second arm's first Policy call. A mismatch is
+preserved as `pairing-rejected.json` and cannot be repaired by a worker retry.
+This validation does not restore states, reseed episodes, drop unmatched records
+or relax task horizons/termination rules.
+
+`audit_policy.py` wraps the unchanged official Policy to record the exact
+prepared model inputs, actions and CPU/CUDA RNG states at each batch. Set
+`ROBOCASA365_POLICY_AUDIT` to a fresh absolute JSON path in its process command.
+It adds no forward passes, RNG draws, precision changes or CUDA synchronization.
+By default it publishes progress every ten batches and at each completed group;
+`ROBOCASA365_POLICY_AUDIT_INTERVAL` controls only that evidence flush interval.
+These instrumented runs establish correctness evidence, not production speed.
+
+The audit retains full prepared-input hashes and separately records
+`effective_input_sha256` for this checkpoint's verified evaluation path. It
+checks the actual loaded encoder, normalizer and crop modules and their source
+hashes, evaluation mode and crop configuration. The three RGB paths use a
+deterministic 224×224 center crop, rows/columns `[16:240]` from the 256×256 input;
+all non-image inputs remain included unchanged. Equality is checked on CPU before
+the saved elementwise normalization, without adding a crop to inference, GPU
+copies or model calls. Unsupported modules, training mode or crop paths fail
+closed. Full-image mismatches remain strict failures; a separate behavioral
+report may pass only when verified effective inputs, actions/RNG, physical
+trajectories, outcomes and complete provenance/coverage match. This model-specific
+criterion does not establish full-image equality or apply to arbitrary Policies.
+The [rendering study](../../benchmarks/robocasa365/rendering-correctness-20261107.md)
+records the observed border differences and the pending larger validation.
+
 ## Native comparison
 
 Run the pinned upstream `eval_robocasa.py` with the same simulator, checkpoint,

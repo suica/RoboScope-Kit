@@ -2,6 +2,17 @@
 
 Platform-only release notes from earlier versions are omitted; other changes relevant to the Kit are retained.
 
+## 0.8.0b33 - 2026-11-07
+
+- Bind a renderer's owning EGL context before freeing its GPU resources, preventing sequential
+  native-slot resets from corrupting another slot's framebuffers and textures. Restore an
+  interrupted foreign context after cleanup and release thread-wide EGL state only at exit.
+- Add an isolated paired-validation simulator profile with stable XML reset-region deduplication,
+  explicit stack-base RNG forwarding, separate from the official profile and common to both arms.
+- Extend RoboCasa365 correctness audits with MuJoCo integration-state and compiled-model
+  signatures, environment RNG/controller/sensor signatures, and a Policy audit wrapper that
+  retains full-input hashes alongside verified fixed-crop input hashes.
+
 ## 0.8.0b32 - 2026-11-07
 
 - Add opt-in consumed-frame RGB rendering for RoboCasa365 action chunks. Preserve observable
