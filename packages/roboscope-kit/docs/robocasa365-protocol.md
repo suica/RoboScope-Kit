@@ -88,6 +88,15 @@ generates its native observation; no rendering omission is enabled in this
 baseline. Model normalization, language embeddings and model inference belong
 to the Policy example and are not credited as runtime acceleration.
 
+An experimental `render_mode=consumed` runtime option retains those same required
+frames and reuses discarded intermediate RGB samples without disabling observable
+clocks. It requires a declared stride-eight Policy without intermediate updates
+and the locked simulator patch. Default `all` rendering remains enabled. The
+[small-scale study](../../../benchmarks/robocasa365/runtime-optimization-20261107.md)
+records a rejected full-rollout comparison; this option has not established
+unchanged accuracy or a throughput benefit. Audit and camera-timing switches are
+diagnostic tools and should be off in repeated performance measurements.
+
 The pinned Gym wrapper declares every state space as `Box(-1, 1)`, including
 raw world-frame `state.base_position`. Real kitchen coordinates can exceed those
 bounds, so Gym can warn that an observation is outside its declared space. The

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "patches": [
+    {
+      "source": "robosuite",
+      "revision": "5ce6643f3092639d08f7b0f90ed1c6a84f50552c",
+      "path": "robosuite/environments/robot_env.py",
+      "patch": "patches/camera-rgb-reuse.patch",
+      "patch_sha256": "4a47631f5eb7a2d2b29ee1ea2cba1493e477768716f13fa6a6408c6365617998",
+      "original_sha256": "d0ea6403d2ba499189a07ca5646ed0002a3e13b4a40bb75923958b7d467dd0d9",
+      "patched_sha256": "a6449d5fb41418e51f06e653aa0688547ce97df72ef3dc039076e69a6d3a4d16"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # Copyright 2026 RoboScope Team
 # SPDX-License-Identifier: Apache-2.0
 
-"""Run one full-horizon, five-slot RoboCasa365 task through the public Kit runtime.
+"""Run full-horizon, five-slot groups for one RoboCasa365 task through the Kit runtime.
 
 This checks the native batch-five path without running the full 2,500-rollout
 matrix. It is a smoke workload, not a formal suite or a throughput comparison.
@@ -41,6 +41,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-source", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--gpu-device", default="0", help="one physical GPU index; default: 0")
+    parser.add_argument(
+        "--task", choices=SUITES["target50"], default=SUITES["target50"][0],
+        help="one official target50 task; default: CloseBlenderLid",
+    )
+    parser.add_argument(
+        "--groups", type=int, choices=range(1, 11), default=1,
+        help="sequential native five-slot groups (1-10); default: 1",
+    )
+    parser.add_argument("--render-mode", choices=("all", "consumed"), default="all")
+    parser.add_argument("--audit-trajectories", action="store_true")
+    parser.add_argument("--diagnostic-timings", action="store_true")
     return parser.parse_args()
 
 
@@ -57,20 +68,25 @@ def main() -> int:
     output_dir = args.output_dir.resolve()
     request = BenchmarkRunRequest(
         benchmark=benchmark, suite=suite, checkpoint_path=checkpoint,
-        output_dir=output_dir, episodes=NATIVE_ENVS, quick_test=False,
+        output_dir=output_dir, episodes=NATIVE_ENVS * args.groups, quick_test=False,
     )
     # The public factory validates every frozen manifest setting. Restrict only
     # the task list; native slot count, reset streams and horizons stay intact.
     reference = RoboCasa365BenchmarkFactory().create(request, manifest)
     adapter = RoboCasa365BenchmarkAdapter(replace(
-        reference.config, tasks=(SUITES[suite][0],), save_videos=False,
+        reference.config, tasks=(args.task,), save_videos=False, render_mode=args.render_mode,
+        audit_trajectories=args.audit_trajectories, diagnostic_timings=args.diagnostic_timings,
     ))
     ready_timeout = float(manifest.defaults.get("ready_timeout_s", 900))
     inference = PolicyProcessAdapter(
         command=policy.command, checkpoint_path=checkpoint,
         benchmark=benchmark, suite=suite, benchmark_spec=get_benchmark_spec(benchmark, suite),
         cwd=policy.cwd, load_timeout_s=ready_timeout,
-        session_metadata={"validation_scope": "native-five-slot-smoke"},
+        session_metadata={
+            "validation_scope": "native-five-slot-smoke",
+            "task": args.task, "groups": args.groups,
+            "episodes": NATIVE_ENVS * args.groups,
+        },
     )
     runtime = ParallelBenchmarkRuntime(
         config=RuntimeConfig(
@@ -91,12 +107,17 @@ def main() -> int:
                 pass
             result = runtime.run(phase_timing_callback=recorder.handle_phase)
             result["validation_scope"] = "one-task native-five-slot smoke; not a formal suite"
+            result["validation_workload"] = {
+                "task": args.task, "native_envs_per_group": NATIVE_ENVS,
+                "groups": args.groups, "episodes": NATIVE_ENVS * args.groups,
+            }
             result["autotune"] = {"k": 1, "g": 1, "mode": "fixed-group-smoke"}
             result["end_to_end_wall_s"] = time.monotonic() - started
             atomic_json(output_dir / "result.json", result)
             print(json.dumps({
                 "validation_scope": result["validation_scope"],
-                "task": SUITES[suite][0], "native_envs": NATIVE_ENVS,
+                "task": args.task, "native_envs": NATIVE_ENVS,
+                "groups": args.groups, "episodes": NATIVE_ENVS * args.groups,
                 "full_suite": result["official_result"]["full_suite"],
                 "result": result["result"], "phase_timings": result["phase_timings"],
                 "end_to_end_wall_s": result["end_to_end_wall_s"],

@@ -1,0 +1,71 @@
+--- a/robosuite/environments/robot_env.py
++++ b/robosuite/environments/robot_env.py
+@@ -1,5 +1,6 @@
+ from collections import OrderedDict
+ from copy import deepcopy
++from time import perf_counter
+ 
+ import numpy as np
+ 
+@@ -7,7 +8,7 @@
+ from robosuite.environments.base import MujocoEnv
+ from robosuite.robots import ROBOT_CLASS_MAPPING
+ from robosuite.utils.mjcf_utils import IMAGE_CONVENTION_MAPPING
+-from robosuite.utils.observables import Observable, sensor
++from robosuite.utils.observables import NO_CORRUPTION, NO_DELAY, NO_FILTER, Observable, sensor
+ 
+ 
+ class RobotEnv(MujocoEnv):
+@@ -122,6 +123,8 @@
+         ValueError: [Camera obs require offscreen renderer]
+         ValueError: [Camera name must be specified to use camera obs]
+     """
++
++    _roboscope_camera_gate_version = 1
+ 
+     def __init__(
+         self,
+@@ -415,12 +418,43 @@
+ 
+         @sensor(modality=modality)
+         def camera_rgb(obs_cache):
++            measure = getattr(self, "_roboscope_measure_camera_render", False)
++            # The Kit may discard an intermediate RGB frame while retaining the
++            # native Observable clock, cache updates and all physical stepping.
++            # Never disable the Observable: that would reset its sample phase.
++            if not getattr(self, "_roboscope_render_images", True):
++                observable = self._observables.get(rgb_sensor_name)
++                if (
++                    cam_d
++                    or cam_segs is not None
++                    or modality != "image"
++                    or observable is None
++                    or observable._corrupter is not NO_CORRUPTION
++                    or observable._filter is not NO_FILTER
++                    or observable._delayer is not NO_DELAY
++                ):
++                    raise RuntimeError("RoboScope RGB reuse requires pure RGB camera observables")
++                if rgb_sensor_name not in obs_cache:
++                    raise RuntimeError("RoboScope RGB reuse requires an existing native camera sample")
++                cached = obs_cache[rgb_sensor_name]
++                if cached.shape != (cam_h, cam_w, 3) or cached.dtype != np.uint8:
++                    raise RuntimeError("RoboScope RGB reuse received an invalid native camera sample")
++                if measure:
++                    self._roboscope_camera_reuse_calls = getattr(self, "_roboscope_camera_reuse_calls", 0) + 1
++                return cached
++            if measure:
++                started = perf_counter()
+             img = self.sim.render(
+                 camera_name=cam_name,
+                 width=cam_w,
+                 height=cam_h,
+                 depth=cam_d,
+             )
++            if measure:
++                # Inclusive render API wall time; no device synchronization.
++                self._roboscope_camera_render_calls = getattr(self, "_roboscope_camera_render_calls", 0) + 1
++                elapsed = perf_counter() - started
++                self._roboscope_camera_render_s = getattr(self, "_roboscope_camera_render_s", 0.0) + elapsed
+             if cam_d:
+                 rgb, depth = img
+                 obs_cache[depth_sensor_name] = np.expand_dims(depth[::convention], axis=-1)

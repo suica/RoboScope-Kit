@@ -101,6 +101,13 @@ is not in the report, only the round-trip time of each request.
 Each benchmark keeps its profiling findings in its own documentation, newest first, with the date, machine,
 configuration, and Kit version:
 
+- [RoboCasa365 small-scale follow-up](https://github.com/MINT-SJTU/RoboScope-Kit/blob/main/benchmarks/robocasa365/runtime-optimization-20261107.md):
+  five-slot TurnOnElectricKettle screening reached 1/5 successes. Diagnostic attribution measured
+  79.35 s in native steps, 38.76 s in Policy round trips and 51.88 s in construction/reset;
+  camera API wall time was only 3.92 s (2026-11-07, RTX 4090, Kit 0.8.0b32, K=1/G=1).
+  Consumed-frame rendering reduced camera calls but the full comparison rejected different initial
+  scenarios and trajectories; no speedup ratio or unchanged-accuracy claim was accepted. Separate
+  server CUDA event intervals include stream idle gaps and are not Nsight kernel-level coverage.
 - [RoboCasa365](https://github.com/MINT-SJTU/RoboScope-Kit/blob/main/benchmarks/robocasa365/validation-20261107.md#worker-phase-measurements):
   worker phase timers on an RTX 4090 found 65.05 s in Policy round trips and 47.02 s in
   simulation/observations/rendering for a real 900-step smoke episode (2026-11-07, Kit 0.8.0b31,

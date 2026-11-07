@@ -2,6 +2,14 @@
 
 Platform-only release notes from earlier versions are omitted; other changes relevant to the Kit are retained.
 
+## 0.8.0b32 - 2026-11-07
+
+- Add opt-in consumed-frame RGB rendering for RoboCasa365 action chunks. Preserve observable
+  sampling clocks, physical steps, native success checks and the final two physical frames;
+  require a stride-eight Policy without intermediate updates and the reproducible simulator patch.
+- Support selecting one official task and one to ten native five-slot groups for small-scale
+  validation, with optional complete-rollout digests and separate camera API wall-time counters.
+
 ## 0.8.0b31 - 2026-11-07
 
 - Add an isolated RoboCasa365 multi-task benchmark and official Diffusion Policy example, preserving

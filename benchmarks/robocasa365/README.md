@@ -80,3 +80,8 @@ measured results and their limits here before making those claims.
 [2026-11-07 integration validation](validation-20261107.md) records the fresh builds,
 real one-slot and five-slot smoke runs, exact native first-batch comparison,
 worker phase measurements and remaining full-suite acceptance work.
+
+The [small-scale runtime study](runtime-optimization-20261107.md) records task
+screening, phase attribution, the opt-in consumed-frame rendering experiment and
+its correctness/performance evidence. Use the example's `--task` and `--groups`
+options for iteration before expanding the task matrix.

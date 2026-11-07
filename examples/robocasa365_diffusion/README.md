@@ -134,10 +134,31 @@ python examples/robocasa365_diffusion/run_group_smoke.py \
   --output-dir /results/robocasa365-group-smoke
 ```
 
-It runs the first target50 task in all five native slots, with five full-horizon
-rollouts, fixed K=1/G=1 and videos disabled. It records `full_suite: false` and
-is not a formal score or an acceleration measurement. The captured first batch
-can be passed to `compare_native.py` in the same way as a single-slot capture.
+By default it runs the first target50 task in all five native slots. Use
+`--task <official-task-name> --groups 1` to select five full-horizon episodes;
+`--groups 2` continues the same five constructor/reset streams for ten episodes.
+One to ten groups are supported. K=1/G=1 and videos remain fixed. This makes a
+small workload explicit without shortening horizons, padding records or changing
+the formal suite. Outputs record `full_suite: false` and the selected workload.
+The captured first batch can be passed to `compare_native.py` in the same way as
+a single-slot capture.
+
+`--render-mode all` is the default baseline. The optional `--render-mode consumed`
+requires rebuilding the simulator with the committed RGB sensor patch. It renders
+the final two consecutive physical frames of every action chunk and reuses only
+discarded intermediate camera samples. Sensor clocks, physics, controllers and
+success checks still execute at their native frequency. Partial final chunks keep
+their own last two frames. A Policy must declare stride eight without intermediate
+observation updates; depth, segmentation and custom camera processing are rejected.
+The benchmark worker also preserves the native odd-step video frames when video
+logging is enabled. Neither the model nor its denoising schedule is changed.
+
+For a correctness run, add `--audit-trajectories`: records contain independent
+digests of all consumed features/actions and every physical state/control/success
+transition; per-batch hashes are saved outside Git in the run's evidence folder.
+`--diagnostic-timings` adds render API wall-time and call counters. Camera API time
+is a subset of environment-step time, not a separate additive phase or isolated
+GPU kernel time. Disable both diagnostic flags in repeated timing comparisons.
 
 ## Native comparison
 

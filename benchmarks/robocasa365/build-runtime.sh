@@ -98,6 +98,8 @@ fi
 "${PYTHON}" -I "${SCRIPT_DIR}/install-sources.py" \
   --source-root "${SOURCE_ROOT}" \
   --cache-dir "${ROBOSCOPE_ROBOCASA365_SOURCE_CACHE:-${INSTALL_DIR}/source-cache}"
+"${PYTHON}" -I "${SCRIPT_DIR}/apply-runtime-patches.py" \
+  --source-root "${SOURCE_ROOT}"
 # These checkouts declare training, dataset-conversion and device extras that
 # evaluation never imports. Use the explicit runtime lock instead of resolving
 # lerobot / tianshou / pynput / hidapi / pygame or changing the pinned simulator's
@@ -129,6 +131,7 @@ PY
 "${UV_BIN}" pip freeze --python "${PYTHON}" > "${INSTALL_DIR}/pip-freeze.txt"
 install -m 0644 "${SCRIPT_DIR}/runtime-requirements.txt" "${INSTALL_DIR}/runtime-requirements.txt"
 install -m 0644 "${SCRIPT_DIR}/source-inputs.json" "${INSTALL_DIR}/source-inputs.json"
+install -m 0644 "${SCRIPT_DIR}/runtime-patches.json" "${INSTALL_DIR}/runtime-patches.json"
 if [[ "${ENVIRONMENT_ONLY}" -eq 1 ]]; then
   echo "Prepared RoboCasa365 environment only: ${INSTALL_DIR}; assets and self-test remain"
   exit 0

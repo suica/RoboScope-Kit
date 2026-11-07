@@ -71,6 +71,8 @@ class RoboCasa365BenchmarkFactory:
             (str(python), "-c",
              "from roboscope_kit.runtime.benchmarks.robocasa365.protocol import validate_upstream; "
              "validate_upstream(); import robocasa.wrappers.gym_wrapper; "
+             "from robosuite.environments.robot_env import RobotEnv; "
+             "assert RobotEnv._roboscope_camera_gate_version == 1; "
              "print('RoboCasa365 imports and frozen registry passed')"),
             check=True, cwd=root,
             env={**os.environ, "PYTHONPATH": str(kit_import_root()), "MUJOCO_GL": "egl"},
@@ -80,6 +82,7 @@ class RoboCasa365BenchmarkFactory:
             "benchmark": "robocasa365", "python": str(python), "benchmark_root": str(root),
             "suites": list(SUITES), "task_count": len(SUITES["target50"]),
             "registry_verified": True, "simulator_episode_tested": False,
+            "camera_gate_version": 1,
         }
 
     @staticmethod
@@ -108,4 +111,5 @@ class RoboCasa365BenchmarkFactory:
             suite=request.suite, tasks=tasks, episodes_per_task=episodes, native_envs=native_envs,
             cpu_threads=int(manifest.defaults.get("client_cpu_threads", 1)),
             save_videos=bool(manifest.defaults.get("save_videos", False)),
+            render_mode=str(manifest.defaults.get("render_mode", "all")),
         ))

@@ -49,6 +49,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--worker-state-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--save-videos", action="store_true")
+    parser.add_argument("--render-mode", choices=("all", "consumed"), default="all")
+    parser.add_argument("--audit-trajectories", action="store_true")
+    parser.add_argument("--diagnostic-timings", action="store_true")
     parser.add_argument("--poll-interval", type=float, default=0.05)
     return parser.parse_args()
 
@@ -136,6 +139,39 @@ def save_first_batch(args: argparse.Namespace, task: str, observations: tuple, c
     np.savez(path, **values)
 
 
+def feature_digest(observation: Observation) -> bytes:
+    digest = hashlib.sha256()
+    for key, value in sorted(observation.features.items()):
+        digest.update(key.encode())
+        digest.update(value.encode() if isinstance(value, str) else value.tobytes())
+    return digest.digest()
+
+
+def configure_rendering(environment, args: argparse.Namespace) -> None:
+    native = environment.unwrapped.env
+    if (args.render_mode == "consumed" or args.diagnostic_timings) and (
+        getattr(native, "_roboscope_camera_gate_version", None) != 1
+    ):
+        raise RuntimeError("rebuild RoboCasa365 runtime with the committed camera patch")
+    if args.render_mode == "consumed":
+        if not native.ignore_done or native.viewer_get_obs:
+            raise RuntimeError("consumed rendering requires the pinned headless ignore_done runtime")
+        if any(native.camera_depths) or any(native.camera_segmentations):
+            raise RuntimeError("consumed rendering supports RGB without depth or segmentation")
+    native._roboscope_measure_camera_render = args.diagnostic_timings
+
+
+def camera_counters(environments: list) -> dict[str, float]:
+    return {
+        key: sum(float(getattr(environment.unwrapped.env, attribute, 0)) for environment in environments)
+        for key, attribute in (
+            ("camera_render_s", "_roboscope_camera_render_s"),
+            ("camera_render_calls", "_roboscope_camera_render_calls"),
+            ("camera_reuse_calls", "_roboscope_camera_reuse_calls"),
+        )
+    }
+
+
 def run_group(
     args: argparse.Namespace, task: Task, environments: list,
     stream_episode: int, client: PolicyClient,
@@ -158,6 +194,7 @@ def run_group(
                 environment, build_observation(identifiers[slot], 0, history)
             ))
     reset_s = time.perf_counter() - reset_started
+    cameras_before = camera_counters(environments)
     started = time.perf_counter()
     steps = [0] * count
     successes = [False] * count
@@ -166,6 +203,18 @@ def run_group(
     inference_s = 0.0
     stepping_s = 0.0
     video_s = 0.0
+    observation_s = 0.0
+    conversion_s = 0.0
+    lifecycle_s = 0.0
+    evidence_s = 0.0
+    audit_s = 0.0
+    inference_calls = 0
+    fresh_observation_steps = 0
+    hashes = [
+        {key: hashlib.sha256() for key in ("physical_state", "policy_observations", "policy_actions")}
+        for _ in environments
+    ] if args.audit_trajectories else []
+    audit_batches = []
     termination = "horizon"
     with ExitStack() as stack:
         writers = []
@@ -192,43 +241,84 @@ def run_group(
                     "stream_episode": stream_episode, "constructor_seed": CONSTRUCTOR_SEED + slot,
                     "scene_split": SCENE_SPLIT, "native_envs": count,
                 })
+                lifecycle_started = time.perf_counter()
                 if profiling.ENABLED:
                     # PolicyClient's automatic range assumes serial episodes.
                     # Keep one capture open for the entire native group instead.
                     client._request("reset", {"context": context.to_dict()})
                 else:
                     client.reset(context)
+                lifecycle_s += time.perf_counter() - lifecycle_started
                 reset_ids.append(identifier)
             while not all(dones):
+                observation_started = time.perf_counter()
                 observations = tuple(
                     build_observation(identifier, steps[slot], histories[slot])
                     for slot, identifier in enumerate(identifiers)
                 )
+                observation_s += time.perf_counter() - observation_started
                 inference_started = time.perf_counter()
                 # Native inference includes done slots; their wrapper ignores actions.
                 chunks = client.act_batch(observations)
                 inference_s += time.perf_counter() - inference_started
+                inference_calls += 1
                 if len(chunks) != count:
                     raise RuntimeError("RoboCasa365 Policy returned an incomplete action batch")
                 if stream_episode == 0 and not any(steps):
+                    evidence_started = time.perf_counter()
                     save_first_batch(args, task.name, observations, chunks)
+                    evidence_s += time.perf_counter() - evidence_started
+                if args.audit_trajectories:
+                    audit_started = time.perf_counter()
+                    batch = []
+                    for slot, (observation, chunk) in enumerate(zip(observations, chunks, strict=True)):
+                        digest = feature_digest(observation)
+                        hashes[slot]["policy_observations"].update(digest)
+                        actions_digest = hashlib.sha256(np.asarray(chunk.actions).tobytes()).digest()
+                        hashes[slot]["policy_actions"].update(actions_digest)
+                        batch.append({
+                            "episode_id": observation.episode_id, "step": observation.step,
+                            "observation_sha256": digest.hex(), "actions_sha256": actions_digest.hex(),
+                        })
+                    audit_batches.append(batch)
+                    audit_s += time.perf_counter() - audit_started
                 for slot, chunk in enumerate(chunks):
                     actions = validate_actions(chunk.actions)
-                    for action in actions:
+                    chunk_steps = min(len(actions), task.horizon - steps[slot])
+                    for offset, action in enumerate(actions):
                         if dones[slot]:
                             break
+                        render_images = (
+                            args.render_mode == "all" or offset >= chunk_steps - OBSERVATION_STEPS
+                            or (writers[slot] is not None and (steps[slot] + 1) % 2 == 1)
+                        )
+                        native_env = environments[slot].unwrapped.env
+                        native_env._roboscope_render_images = render_images
+                        conversion_started = time.perf_counter()
+                        converted = convert_action(action)
+                        conversion_s += time.perf_counter() - conversion_started
                         step_started = time.perf_counter()
-                        with environment_range("environment.step"):
-                            native, _, terminated, truncated, info = environments[slot].step(
-                                convert_action(action)
-                            )
+                        try:
+                            with environment_range("environment.step"):
+                                native, _, terminated, truncated, info = environments[slot].step(converted)
+                        finally:
+                            native_env._roboscope_render_images = True
                         stepping_s += time.perf_counter() - step_started
+                        fresh_observation_steps += int(render_images)
                         histories[slot].append(native)
                         steps[slot] += 1
                         success = bool(info["success"])
                         recent_success[slot].append(success)
                         successes[slot] |= success
                         dones[slot] = bool(terminated or truncated or steps[slot] >= task.horizon)
+                        if args.audit_trajectories:
+                            audit_started = time.perf_counter()
+                            digest = hashes[slot]["physical_state"]
+                            state = np.asarray(native_env.sim.get_state().flatten(), dtype=np.float64)
+                            digest.update(state.tobytes())
+                            digest.update(np.asarray(native_env.sim.data.ctrl, dtype=np.float64).tobytes())
+                            digest.update(bytes((success, dones[slot])))
+                            audit_s += time.perf_counter() - audit_started
                         # Native VideoRecordingWrapper starts its counter at 1
                         # after reset, so a 20 Hz / 10 fps run records steps 1, 3, ...
                         if writers[slot] is not None and steps[slot] % 2 == 1:
@@ -244,14 +334,25 @@ def run_group(
         finally:
             try:
                 for identifier in reset_ids:
+                    lifecycle_started = time.perf_counter()
                     if profiling.ENABLED:
                         client._request("end_episode", {"episode_id": identifier})
                     else:
                         client.end_episode(identifier)
+                    lifecycle_s += time.perf_counter() - lifecycle_started
             finally:
                 if profiling.ENABLED:
                     profiling.episode_end()
     elapsed_s = time.perf_counter() - started
+    if args.audit_trajectories:
+        evidence_started = time.perf_counter()
+        path = (
+            args.output_dir / "evidence" / f"worker-{args.worker_id:03d}"
+            / f"{task.name}-group-{stream_episode:02d}-audit.json"
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"task": task.name, "batches": audit_batches}, separators=(",", ":")))
+        evidence_s += time.perf_counter() - evidence_started
     records = [
         EvaluationRecord(
             identifiers[slot], successes[slot], steps[slot], elapsed_s,
@@ -262,14 +363,23 @@ def run_group(
                 "constructor_seed": CONSTRUCTOR_SEED + slot,
                 "horizon": task.horizon, "termination": termination,
                 "group_elapsed_s": elapsed_s, "group_reset_s": reset_s,
+                "render_mode": args.render_mode,
+                **({"trajectory_sha256": {key: value.hexdigest() for key, value in hashes[slot].items()}}
+                   if args.audit_trajectories else {}),
                 **fingerprints[slot],
             },
         )
         for slot in range(count)
     ]
+    cameras_after = camera_counters(environments)
     return records, {
         "reset_s": reset_s, "inference_wait_s": inference_s,
         "environment_step_s": stepping_s, "video_write_s": video_s,
+        "observation_build_s": observation_s, "action_conversion_s": conversion_s,
+        "policy_lifecycle_s": lifecycle_s, "evidence_write_s": evidence_s, "audit_s": audit_s,
+        "policy_batch_calls": inference_calls, "physical_steps": sum(steps),
+        "fresh_observation_steps": fresh_observation_steps,
+        **{key: cameras_after[key] - value for key, value in cameras_before.items()},
     }
 
 
@@ -283,12 +393,17 @@ def run_task(args: argparse.Namespace, item: WorkItem) -> WorkResult:
     records = []
     timings = {
         "reset_s": 0.0, "inference_wait_s": 0.0, "environment_step_s": 0.0, "video_write_s": 0.0,
+        "observation_build_s": 0.0, "action_conversion_s": 0.0,
+        "policy_lifecycle_s": 0.0, "evidence_write_s": 0.0, "audit_s": 0.0,
+        "camera_render_s": 0.0, "camera_render_calls": 0.0, "camera_reuse_calls": 0.0,
+        "policy_batch_calls": 0, "physical_steps": 0, "fresh_observation_steps": 0,
     }
     started = time.perf_counter()
     try:
         with environment_range("environment.create"):
             for slot in range(count):
                 environments.append(create_environment(task, slot))
+                configure_rendering(environments[-1], args)
         timings["environment_create_s"] = time.perf_counter() - started
         with PolicyClient(args.policy_socket, timeout_s=300) as client:
             for group in range(episodes // count):
@@ -308,7 +423,9 @@ def run_task(args: argparse.Namespace, item: WorkItem) -> WorkResult:
     timings["task_elapsed_s"] = time.perf_counter() - started
     return WorkResult(
         item.item_id, item.group_id, args.worker_id, tuple(records),
-        {"task": task.name, "native_envs": count, "timings": timings},
+        {"task": task.name, "native_envs": count, "render_mode": args.render_mode,
+         "audit_trajectories": args.audit_trajectories,
+         "diagnostic_timings": args.diagnostic_timings, "timings": timings},
     )
 
 

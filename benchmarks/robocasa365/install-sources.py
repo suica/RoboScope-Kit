@@ -50,9 +50,22 @@ def verify_source(destination: Path, spec: dict) -> None:
     record = json.loads(marker.read_text(encoding="utf-8"))
     if record.get("source") != spec:
         raise RuntimeError(f"Source pin or archive differs for {destination}")
+    patch_inputs = json.loads(Path(__file__).with_name("runtime-patches.json").read_text(encoding="utf-8"))
+    if patch_inputs.get("schema_version") != 1:
+        raise ValueError("Expected runtime patch input schema 1")
+    reviewed = {
+        patch["path"]: patch for patch in patch_inputs["patches"]
+        if patch["source"] == destination.name and patch["revision"] == spec["revision"]
+    }
     for relative, digest in record["files"].items():
         path = destination / relative
-        if not path.is_file() or path.is_symlink() or sha256(path) != digest:
+        allowed = {digest}
+        if relative in reviewed:
+            patch = reviewed[relative]
+            if digest != patch["original_sha256"]:
+                raise RuntimeError(f"Runtime patch original hash differs from the source archive: {path}")
+            allowed.add(patch["patched_sha256"])
+        if not path.is_file() or path.is_symlink() or sha256(path) not in allowed:
             raise RuntimeError(f"Pinned source file changed or disappeared: {path}")
     # Editable builds may add egg-info / bytecode. Official asset ZIPs also
     # contain texture-generation utility scripts; their separate ZIP lock owns

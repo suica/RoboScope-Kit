@@ -43,6 +43,9 @@ class RoboCasa365RuntimeConfig:
     native_envs: int = NATIVE_ENVS
     cpu_threads: int = 1
     save_videos: bool = False
+    render_mode: str = "all"
+    audit_trajectories: bool = False
+    diagnostic_timings: bool = False
 
     def __post_init__(self) -> None:
         if self.suite not in SUITES:
@@ -59,6 +62,8 @@ class RoboCasa365RuntimeConfig:
             raise ValueError("RoboCasa365 episodes must be divisible by native_envs; no padded records")
         if self.cpu_threads < 1:
             raise ValueError("RoboCasa365 cpu_threads must be positive")
+        if self.render_mode not in {"all", "consumed"}:
+            raise ValueError("RoboCasa365 render_mode must be all or consumed")
 
     @property
     def full_suite(self) -> bool:
@@ -89,6 +94,11 @@ class RoboCasa365BenchmarkAdapter:
         )
 
     def worker_process(self, context: WorkerContext) -> ProcessSpec:
+        contract = context.execution_contract
+        if self.config.render_mode == "consumed" and (
+            contract.observation_stride != ACTION_STEPS or contract.step_observation_updates
+        ):
+            raise ValueError("consumed rendering requires stride 8 without intermediate Policy updates")
         threads = str(self.config.cpu_threads)
         return ProcessSpec(
             command=(
@@ -98,7 +108,10 @@ class RoboCasa365BenchmarkAdapter:
                 "--queue-dir", str(context.queue_dir),
                 "--worker-state-dir", str(context.state_dir),
                 "--output-dir", str(context.output_dir),
+                "--render-mode", self.config.render_mode,
                 *(("--save-videos",) if self.config.save_videos else ()),
+                *(("--audit-trajectories",) if self.config.audit_trajectories else ()),
+                *(("--diagnostic-timings",) if self.config.diagnostic_timings else ()),
             ),
             cwd=self.config.benchmark_root,
             env={
@@ -183,6 +196,9 @@ class RoboCasa365BenchmarkAdapter:
             "action_steps": ACTION_STEPS, "observation_steps": OBSERVATION_STEPS,
             "action_representation": ACTION_REPRESENTATION, "control_freq_hz": CONTROL_FREQ_HZ,
             "video_logging": self.config.save_videos,
+            "render_mode": self.config.render_mode,
+            "audit_trajectories": self.config.audit_trajectories,
+            "diagnostic_timings": self.config.diagnostic_timings,
             "scenario_plan": scenario_plan(
                 self.config.tasks, self.config.episodes_per_task, self.config.native_envs
             ),
